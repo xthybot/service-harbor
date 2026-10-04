@@ -24,6 +24,8 @@ def set_port(service_id: str, port: int | None) -> int | None:
         raise KeyError('Unknown service')
     if port is not None and (type(port) is not int or not 1 <= port <= 65535):
         raise ValueError('Port must be between 1 and 65535.')
+    if port is not None and not SERVICE_BY_ID[service_id].get('unit', service_id):
+        raise ValueError('A systemd unit is required to assign a service port.')
     with registry.LOCK:
         ports = get_ports()
         ports[service_id] = port

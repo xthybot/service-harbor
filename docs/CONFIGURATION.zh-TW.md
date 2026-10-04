@@ -31,7 +31,7 @@ bash scripts/reset.sh
 
 - user 單元固定在 `~/.config/systemd/user/host-service-dashboard.service`；環境檔可使用自訂 XDG_CONFIG_HOME。
 - system 單元在 `/etc/systemd/system/host-service-dashboard.service`，明確指定安裝帳號的 User／Group、使用者 bus 和程序專屬 systemd-journal 附加群組。
-- 兩種模式都保證 linger 已啟用；程序不以 root 執行，不生成 sudoers 候選檔／免密碼授權。
+- 兩種模式在安裝時確認 linger 已啟用；程序不以 root 執行，不生成 sudoers 候選檔／免密碼授權。
 - 服務自身的 catalog scope／預設 Port 讀取安裝環境；既有自身 Port 覆寫會在 setup 時同步為新 Port，其他服務資料不改動。公開 Open URL 覆寫仍保留。
 - 頁尾 Port 顯示瀏覽器實際連線的 Port，使用反向代理時可能與後端監聽埠不同。
 
@@ -52,14 +52,14 @@ sudo systemctl restart host-service-dashboard.service
 
 Open ports 的「Add port」可另外儲存非 systemd 服務，資料在私密的 `data/manual-ports.json`。Host 可選本機、Hosts 中已登記的主機，或填入其他 IP／hostname；「Service / source」可填 unit、檔案路徑、網址或留空。新增與修改前按「Check port」，會從 Dashboard 主機發起 TCP 連線檢查（每個候選位址連線逾時一秒，DNS 解析另計），顯示 Open／Unreachable、是否已有同主機同 Port 紀錄。開啟網站／Open ports 頁或明確刷新時會重新檢查；選取一列時只檢查該 Port 一次，啟用頂端「即時」後每三秒只檢查該列。Open 只代表 TCP 連得上，不代表 HTTP 回應正常；Unreachable 也可能是防火牆或路由限制。本機選項檢查 `127.0.0.1`，若服務只綁定其他介面，請用「Other IP / hostname」填實際位址。這些 Port 檢查不使用 SSH、不要求 sudo，也不執行遠端命令。重複 Port 可在確認後保留兩筆紀錄；刪除 Hosts 主機前，需先移除引用它的手動 Port 紀錄。手動 Port 紀錄屬於網路清單，與 Services 註冊和其 JSON 匯入／匯出分開。
 
-安裝器不自動授權以下操作；既有 sudoers 保留不動。公開版不預載其他 system 單元；私密舊清單的 control_allowed 設定會保留。新增需要啟停權限的 system 單元時，在 `sudoers/host-service-dashboard` 分別加入確切的 start、stop、restart 指令，重新產生候選規則、visudo 驗證並由管理員安裝。模板中的 `@DASHBOARD_USER@` 必須替換為實際帳號；禁止直接安裝未替換的範本。
+安裝器不自動授權以下操作；既有 sudoers 保留不動。公開版不預載其他 system 單元；私密舊清單的 control_allowed 設定會保留。新增需要啟停權限的 system 單元時，先複製 `sudoers/host-service-dashboard`，取消註解並替換實際需要的確切 start、stop、restart 規則，再驗證候選規則；驗證失敗時立即停止，不得安裝。預設範本全為註解，不授予任何服務控制權。模板中的 `@DASHBOARD_USER@` 必須替換為實際帳號；禁止直接安裝未替換的範本。
 
 ```bash
 rule_tmp="$(mktemp "$HOME/.config/host-service-dashboard/host-service-dashboard.sudoers.XXXXXX")"
 sed "s/@DASHBOARD_USER@/$(id -un)/g" sudoers/host-service-dashboard > "$rule_tmp"
 chmod 0440 "$rule_tmp"
+sudo visudo -cf "$rule_tmp" || { rm -f -- "$rule_tmp"; exit 1; }
 mv -f -- "$rule_tmp" "$HOME/.config/host-service-dashboard/host-service-dashboard.sudoers"
-sudo visudo -cf "$HOME/.config/host-service-dashboard/host-service-dashboard.sudoers"
 sudo install -o root -g root -m 0440 "$HOME/.config/host-service-dashboard/host-service-dashboard.sudoers" /etc/sudoers.d/host-service-dashboard
 sudo visudo -c
 systemctl --user restart host-service-dashboard.service
@@ -93,7 +93,7 @@ Overview 使用現有查詢結果顯示 Needs attention（Failed、Unavailable �
 | data/service-favorites.json | 最愛單元 ID |
 | data/sessions.json | session token 雜湊與到期時間 |
 
-檔案於需要時建立，JSON 寫入使用暫存檔與原子替換。不要在服務執行時手動編輯 session 檔，因為它也有程序記憶體快取。整個 data/ 被 Git 忽略；保管方式見維運文件。
+檔案於需要時建立，JSON 寫入使用暫存檔與原子替換。不要在服務執行時手動編輯 session 檔，應停止服務並先完成交易復原。整個 data/ 被 Git 忽略；保管方式見維運文件。
 
 ## 刷新與登入
 
@@ -128,3 +128,7 @@ Tracking 與頂端 Live／Not live 獨立；已限時追蹤的項目不再重複
 Session 每次從加鎖的儲存層確認，不使用跨請求的失效快取。SSE 每 5 秒重新驗證（無 Log 也檢查），撤銷／到期／斷線會終止本機 journalctl 或 SSH 程序，2 秒未結束則 kill。實際遠端 sshd 對斷線程序的處理仍受遠端系統配置影響。
 
 匯入上限是 1 MiB（1,048,576 bytes）。前端預檢 file.size，再分塊累計讀取，送出前檢查 JSON 編碼後大小；後端先驗 Content-Length，再對 request.stream 每塊累計，超限回 413 並停止讀取，不依賴客戶端提供的長度。
+
+## 匯入預覽一致性
+
+預覽會傳回 15 分鐘有效的確認憑據，綁定匯入 JSON 與當時的 Hosts、服務、別名、URL、Port、最愛等設定版本。確認覆蓋時必須帶上憑據；最終核對和多檔寫入在同一資料交易內完成。預覽後相關設定變更或憑據過期會回 409，需重新選檔預覽。只匯入新項目仍可選 Skip existing；新主機始終以未信任狀態加入。

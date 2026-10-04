@@ -71,6 +71,7 @@
   }
 
   function confirm(title, copy, accept) {
+    settleConfirm(false);
     $('#manual-port-confirm-title').textContent = title;
     $('#manual-port-confirm-copy').textContent = copy;
     $('#manual-port-confirm-accept').textContent = accept;
@@ -103,6 +104,7 @@
     if (!form.reportValidity()) return;
     const body = payload();
     const signature = JSON.stringify(body);
+    const generation = editGeneration;
     const button = $('#manual-port-check');
     button.disabled = true;
     $('#manual-port-check-result').textContent = 'Checking…';
@@ -110,6 +112,7 @@
       const result = await api(`/api/ports/manual/check${editId ? `?exclude_id=${encodeURIComponent(editId)}` : ''}`, {
         method: 'POST', body: JSON.stringify(body)
       });
+      if (generation !== editGeneration) return;
       if (signature !== JSON.stringify(payload())) { resetCheck(); return; }
       checkedSignature = signature;
       checkedResult = result;
@@ -117,8 +120,8 @@
       $('#manual-port-check-result').textContent = `✓ Checked · ${result.status}${duplicate}`;
       $('#manual-port-check-result').className = `manual-port-check-result ${result.status === 'Open' ? 'is-open' : 'is-unreachable'}`;
       $('#manual-port-save').disabled = false;
-    } catch (error) { resetCheck(); showToast(error.message, 'error'); }
-    finally { button.disabled = false; }
+    } catch (error) { if (generation === editGeneration && !error.stale) { resetCheck(); showToast(error.message, 'error'); } }
+    finally { if (generation === editGeneration) button.disabled = false; }
   });
 
   form.addEventListener('submit', async event => {
@@ -162,5 +165,10 @@
   $('#manual-port-confirm-cancel').addEventListener('click', () => settleConfirm(false));
   $('#manual-port-confirm-accept').addEventListener('click', () => settleConfirm(true));
   confirmDialog.addEventListener('cancel', event => { event.preventDefault(); settleConfirm(false); });
-  window.addEventListener('dashboard:manual-ports', event => { records = event.detail; });
+  dialog.addEventListener('close', () => { editGeneration++; editId = null; resetCheck(); $('#manual-port-check').disabled = false; });
+  window.addEventListener('dashboard:inventory', event => { records = event.detail.ports.filter(item => item.manual); });
+  window.HostDashboard.registerCleanup(() => {
+    editGeneration++; editId = null; records = []; settleConfirm(false);
+    if (dialog.open) dialog.close(); resetCheck();
+  });
 })();

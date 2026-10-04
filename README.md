@@ -2,7 +2,7 @@
 
 供可信任區域網路使用的 Linux 服務管理網站。Dashboard 以一般使用者執行，提供本機與 SSH 遠端主機的 systemd 狀態、控制和 journal；也能記錄與檢查手動指定的 TCP Port。介面採原生 HTML／CSS／JavaScript，後端為 FastAPI，不需要資料庫或前端建置流程。
 
-目前部署網址：`http://<Dashboard 主機的區網 IP>:8765/`。安裝時可選 user／system 模式、監聽位址和 Port（預設 `0.0.0.0:8765`）。獨立的裝置監控網站位於 `http://<相同 IP>:8766/`，其原始碼與安裝流程在 `~/host-device-monitor`。
+目前部署網址：`http://<Dashboard 主機的區網 IP>:8765/`。安裝時可選 user／system 模式、監聽位址和 Port（預設 `0.0.0.0:8765`）。獨立的裝置監控網站是可選專案，若另行安裝，預設可位於 `http://<相同 IP>:8766/`；其原始碼與安裝流程不隨本 repository 提供。
 
 ## 使用範圍與傳輸安全
 
@@ -72,9 +72,10 @@ bash scripts/uninstall.sh
 | [架構與 API](docs/ARCHITECTURE.zh-TW.md) | 模組、資料流程、API、刷新與權限界線。 |
 | [SSH 主機管理](docs/SSH_HOSTS.zh-TW.md) | 公鑰、主機指紋、遠端命令、journal 與控制權限。 |
 | [裝置監控整合](docs/DEVICE_MONITOR.zh-TW.md) | 獨立監控網站與 Dashboard 的關係。 |
+| [本次安全修正驗收](docs/SAFETY_REMEDIATION_ACCEPTANCE.zh-TW.md) | 登入、匯入、日誌與安裝生命週期的隔離測試及未驗證範圍。 |
 | [AGENTS.md](AGENTS.md) | 開發與維運代理的工作規則和交接清單。 |
 
-`docs/superpowers/` 內的規格與計畫是建立時的歷史紀錄，保留原貌供追溯；現行操作以程式、systemd 範本與上表文件為準。
+公開版不包含私人版本的 `docs/superpowers/` 歷史規劃；現行操作以程式、systemd 範本與上表文件為準。
 
 ## 權限與資料
 
@@ -86,7 +87,7 @@ GitHub 分享 repository 只保存程式、通用範例與文件。實際密碼�
 
 ## 驗收
 
-六項分享修正的 task 與可重跑驗收見 [TASKS.md](TASKS.md) 和 [驗收紀錄](docs/RELEASE_ACCEPTANCE.zh-TW.md)。測試只使用臨時資料與模擬日誌程序，不需控制正式服務。
+原分享修正及本次安全修正的 task 與可重跑驗收見 [TASKS.md](TASKS.md)、[分享版驗收紀錄](docs/RELEASE_ACCEPTANCE.zh-TW.md) 與 [安全修正驗收紀錄](docs/SAFETY_REMEDIATION_ACCEPTANCE.zh-TW.md)。測試只使用臨時資料與模擬日誌程序，不需控制正式服務。
 
 ## 授權
 

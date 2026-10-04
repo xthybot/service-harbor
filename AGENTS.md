@@ -4,7 +4,7 @@
 
 ## 專案與入口
 
-此專案是一般帳號執行的 FastAPI Dashboard。裝置收集器與獨立監控網站的原始碼位於 `~/host-device-monitor`；Dashboard 仍保留該服務的卡片與控制。沒有前端 build、資料庫或 Node runtime 依賴。先讀 README.md 與 docs/ 下的安裝、設定、架構、維運、監控和 SSH 主機指南。`docs/superpowers/` 是歷史規格與計畫，不能把早期的刷新、連結或 Port 設計當成現況。
+此專案是一般帳號執行的 FastAPI Dashboard。裝置收集器與獨立監控網站的原始碼位於 `~/host-device-monitor`；公開預設只含 Dashboard；另裝 monitor 後需透過 Add service 註冊卡片，system 控制需精確 sudoers。沒有前端 build、資料庫或 Node runtime 依賴。先讀 README.md 與 docs/ 下的安裝、設定、架構、維運、監控和 SSH 主機指南。公開版不包含私有歷史的 `docs/superpowers/`；以現行程式、TASKS.md 與 docs 為準。
 
 建議部署目錄為 `~/host-service-dashboard`，預設綁定 0.0.0.0:8765。分享安裝可自選路徑、IP、Port 及 user/system 模式，依私密 install.json 與實際 unit 判斷。實際執行設定在 `~/.config/host-service-dashboard/dashboard.env`，不是 repo 的 .env.example。Python 相依套件在 .venv。外部單元可能是正式服務，修改操作會影響使用者。
 
@@ -12,7 +12,7 @@
 
 - 看 git status、diff、remote 與目前分支，確認 repository 與公開狀態。開發前建立並切換新分支；驗證通過後合併至本機 main。保存使用者未提交的修改，不做 reset --hard 或強制推送。只有使用者要求推送時才使用 `gh` 處理 GitHub 操作，透過 SSH 執行 git push。
 - 讀變更相關模組和 systemd 範本，確認原始碼與實際安裝檔差異。
-- 文件／備份工作不需要重啟網站；Python 行為修改後需要 user service restart。純靜態檔由服務直接讀取，但瀏覽器需載入新版資源。
+- 文件／備份工作不需要重啟網站；Python 行為修改後，正式部署時需依安裝模式重啟；未獲授權時只做隔離驗證。純靜態檔由服務直接讀取，但瀏覽器需載入新版資源。
 - 維持簡單架構與既有 responsive 視覺；側邊欄字級與大小有使用者既定要求，不應跟隨主內容字級任意放大。
 
 ## 不可破壞的界線

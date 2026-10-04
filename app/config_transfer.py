@@ -2,6 +2,11 @@
 
 from datetime import datetime, timezone
 import uuid
+import hashlib
+import hmac
+import json
+import secrets
+import time
 
 from . import storage, registry, service_favorites, service_names, service_ports, service_urls, ssh_hosts
 from .catalog import SERVICES, SERVICE_BY_ID
@@ -11,6 +16,45 @@ FORMAT = 'host-service-dashboard-services'
 VERSION = 1
 MAX_IMPORT_SERVICES = 250
 CATEGORIES = {'Websites', 'Tools', 'Automation', 'Gateways', 'Monitoring', 'Network', 'Remote Access', 'Management', 'Other'}
+
+
+class ImportConflict(ValueError):
+    """The confirmed preview no longer describes this transaction."""
+
+
+_PREVIEW_KEY = secrets.token_bytes(32)
+PREVIEW_TTL = 15 * 60
+_REVISION_FILES = ('hosts.json', 'registered-services.json', 'local-catalog.json',
+                   'service-metadata.json', 'service-names.json', 'service-open-urls.json',
+                   'service-ports.json', 'service-favorites.json')
+
+
+def _digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _revision():
+    # Caller holds the same transaction lock through final validation and commit.
+    return _digest([SERVICES, *[storage.read(name, None) for name in _REVISION_FILES]])
+
+
+def _preview_token(document, revision):
+    payload = f'{int(time.time()) + PREVIEW_TTL}.{_digest(document)}.{revision}'
+    return payload + '.' + hmac.new(_PREVIEW_KEY, payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _verify_preview(token, document, revision):
+    try:
+        if not isinstance(token, str) or len(token) > 256:
+            raise ValueError()
+        expires, document_hash, version, signature = token.split('.')
+        payload = '.'.join((expires, document_hash, version))
+        expected = hmac.new(_PREVIEW_KEY, payload.encode(), hashlib.sha256).hexdigest()
+        if (not hmac.compare_digest(signature, expected) or int(expires) < time.time()
+                or document_hash != _digest(document) or version != revision):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ImportConflict('Configuration changed or preview expired. Preview the file again before importing.') from None
 
 
 @storage.locked
@@ -43,7 +87,7 @@ def export_config(selection: str = 'all', value: str = '') -> dict:
             if item is None:
                 raise ValueError(f"Remote host is missing for {entry['id']}.")
             host = {'address': item['address'], 'username': item['username'], 'port': item['port']}
-        services.append({
+        record = {
             'source_id': entry['id'], 'service_type': kind, 'host': host,
             'unit': entry.get('unit', entry['id']) if kind != 'external' else '',
             'scope': entry['scope'], 'display_name': names.get(entry['id'], entry['name']),
@@ -51,7 +95,12 @@ def export_config(selection: str = 'all', value: str = '') -> dict:
             'port': ports.get(entry['id'], entry.get('port')),
             'open_url': urls.get(entry['id'], entry.get('open_url', '')),
             'favorite': entry['id'] in favorites,
-        })
+        }
+        try:
+            _normalized_service(record, len(services) + 1)
+        except ValueError as error:
+            raise ValueError(f"Cannot export {entry['id']}: {error}. Correct the saved settings first.") from error
+        services.append(record)
     return {'format': FORMAT, 'version': VERSION, 'exported_at': datetime.now(timezone.utc).isoformat(), 'services': services}
 
 
@@ -108,6 +157,8 @@ def _normalized_service(raw: dict, index: int) -> dict:
         })
     elif raw.get('host') is not None:
         raise ValueError(f'Service {index}: only remote services may include a host.')
+    registry.normalize_service_fields({'display_name': name, 'description': description, 'category': category,
+                                       'service_type': kind, 'scope': scope, 'unit': unit, 'open_url': url, 'port': port})
     return {'source_id': source_id, 'service_type': kind, 'host': host, 'unit': unit,
             'scope': scope, 'display_name': name, 'description': description,
             'category': category, 'port': port, 'open_url': url, 'favorite': favorite}
@@ -119,7 +170,7 @@ def _identity(entry: dict) -> tuple:
             entry['scope'], entry.get('unit', entry['id']) if kind != 'external' else '')
 
 
-def import_config(document: dict, overwrite: bool = False, dry_run: bool = False) -> dict:
+def import_config(document: dict, overwrite: bool = False, dry_run: bool = False, preview_token: str | None = None) -> dict:
     if not isinstance(document, dict) or document.get('format') != FORMAT or type(document.get('version')) is not int or document['version'] != VERSION:
         raise ValueError('Unsupported service configuration format or version.')
     raw_services = document.get('services')
@@ -128,6 +179,10 @@ def import_config(document: dict, overwrite: bool = False, dry_run: bool = False
     incoming = [_normalized_service(item, index + 1) for index, item in enumerate(raw_services)]
 
     with storage.transaction():
+        revision = _revision()
+        if not dry_run and (preview_token is not None or overwrite):
+            _verify_preview(preview_token, document, revision)
+        token = _preview_token(document, revision) if dry_run else None
         hosts = registry.hosts()
         registered = registry.registered_services()
         metadata = registry.service_metadata()
@@ -221,4 +276,4 @@ def import_config(document: dict, overwrite: bool = False, dry_run: bool = False
             registry.write('service-favorites.json', sorted(favorites))
     return {'added': added, 'updated': updated, 'hosts_added': created_hosts,
             'skipped': skipped, 'conflicts': conflicts,
-            'untrusted_hosts_added': created_hosts, 'warnings': []}
+            'untrusted_hosts_added': created_hosts, 'warnings': [], 'preview_token': token}

@@ -14,7 +14,7 @@ systemctl status host-device-monitor.service --no-pager
 journalctl -u host-device-monitor.service -n 50 --no-pager -o cat
 ```
 
-網站為 `http://<LAN-IP>:8765`。獨立監控檢視器為 `http://<LAN-IP>:8766/`；Dashboard 的 Services 仍保留監控服務卡片與控制。操作服務前使用頁面確認框，注意停止或重啟 Dashboard 本身會短暫中斷瀏覽器連線。
+網站為 `http://<LAN-IP>:8765`。獨立監控檢視器若另行安裝，網址可為 `http://<LAN-IP>:8766/`；Dashboard 需額外註冊該監控服務才會顯示其卡片。操作服務前使用頁面確認框，注意停止或重啟 Dashboard 本身會短暫中斷瀏覽器連線。
 
 ## 更新與推送
 
@@ -27,7 +27,7 @@ git log --oneline --decorate -5
 systemctl --user restart host-service-dashboard.service
 ```
 
-有未提交變更時先檢查並保存，避免覆蓋現場修改。若 requirements.txt 改變，再於一般帳號的 `.venv` 安裝依賴；若 user unit 改變，先安裝對應範本並執行 user daemon-reload。監控原始碼或 system unit 改變時，需要：
+有未提交變更時先檢查並保存，避免覆蓋現場修改。若 requirements.txt 改變，再於一般帳號的 `.venv` 安裝依賴；若 unit 或安裝位置改變，使用 `bash scripts/setup.sh` 或 `bash scripts/reset.sh` 由安裝器生成並驗證單元；不可直接安裝含 `@...@` 的範本。監控原始碼或 system unit 改變時，需要：
 
 ```bash
 cd "$HOME/host-device-monitor"
@@ -67,30 +67,31 @@ chmod 700 "$backup_dir"
   set -e
   trap 'systemctl --user start host-service-dashboard.service' EXIT
   systemctl --user stop host-service-dashboard.service
-  tar --exclude='host-service-dashboard/data/sessions.json' -czf "$backup_dir/dashboard-local.tgz" -C "$HOME" host-service-dashboard/data .config/host-service-dashboard .config/systemd/user/host-service-dashboard.service
+  tar --exclude='host-service-dashboard/data/sessions.json' --exclude='host-service-dashboard/data/.json-transaction.json' -czf "$backup_dir/dashboard-local.tgz" -C "$HOME" host-service-dashboard/data .config/host-service-dashboard .config/systemd/user/host-service-dashboard.service
   chmod 600 "$backup_dir/dashboard-local.tgz"
 )
 ```
 
-先確認各路徑存在。停止 Dashboard 可避免 JSON 在備份過程中更新；上述子程序的 trap 會在結束或失敗時重新啟動服務。此範例預設資料與設定路徑；自訂 DATA_DIR／XDG_CONFIG_HOME 時需調整。session 不備份，還原後重新登入。
+先確認各路徑存在。停止 Dashboard 可避免 JSON 在備份過程中更新；上述子程序的 trap 會在結束或失敗時重新啟動服務。此範例預設資料與設定路徑；自訂 DATA_DIR／XDG_CONFIG_HOME 時需調整。session 不備份，還原後重新登入。備份前先停止服務並確認沒有待復原或損壞的 JSON 交易；若看到 `.json-transaction.json`，先解決復原錯誤，不要刪除該日誌規避錯誤。
 
 journal 由系統 journald 管理，其保存期限與是否持久化不由 repository 控制。需要長期保存監控事件時，管理員另行制定 journal 保存／匯出策略。
 
 ## 還原
 
-於同一執行帳號的家目錄 clone 專案並先跑 setup。選擇可信任的本機 archive，檢查 `tar -tzf <archive>` 清單，再停止 Dashboard，將 archive 解壓至該帳號家目錄。解壓會覆蓋對應檔案，還原前先備份目前版本。
+同機原路徑還原時，先選擇可信任的本機 archive 並檢查 `tar -tzf <archive>` 清單，再停止 Dashboard；先經儲存層完成 recovery，確認沒有損壞交易日誌。解壓會覆蓋對應檔案，還原前先備份目前版本。restore 完成後由安裝器重新生成 unit，再離線撤銷登入。跨主機遷移另見下節。
 
 ```bash
 systemctl --user stop host-service-dashboard.service
 tar -xzf /absolute/path/to/dashboard-local.tgz -C "$HOME"
 chmod 600 "$HOME/.config/host-service-dashboard/dashboard.env"
 chmod 700 "$HOME/host-service-dashboard/data"
-rm -f "$HOME/host-service-dashboard/data/sessions.json"
-systemctl --user daemon-reload
-systemctl --user start host-service-dashboard.service
+python3 scripts/lifecycle.py revoke-sessions
+bash scripts/setup.sh
 ```
 
-移機後重新確認 catalog、unit 路徑、port、linger、journal 群組、LAN 防火牆。實際 root-owned sudoers 與監控 service 需透過安裝步驟重新建立，不靠 user archive 自動還原。
+### 跨主機遷移
+
+先在新主機以新帳號 clone 原始碼並執行 setup 產生新環境、unit 及 receipt；不可直接覆寫舊機的 UID、絕對路徑、unit 或 install.json。停用服務後，只挑選並私密搬移服務、Hosts、別名、URL、Port、最愛等業務 JSON；主機信任指紋與 SSH key 須逐一核對，必要時建立新專用 key 並重新部署公鑰。若資料根不是乾淨目錄，先依安裝文件進行 ownership 核對。完成後用安裝器重建 systemd 設定，離線撤銷 session，再核對 catalog、Port、linger、journal 權限及 LAN 防火牆。實際 root-owned sudoers 與監控服務須另外建立。
 
 ## 密碼與撤銷登入
 
@@ -100,11 +101,11 @@ systemctl --user start host-service-dashboard.service
 
 ```bash
 systemctl --user stop host-service-dashboard.service
-rm -f "$HOME/host-service-dashboard/data/sessions.json"
+python3 scripts/lifecycle.py revoke-sessions
 systemctl --user start host-service-dashboard.service
 ```
 
-自訂 DATA_DIR 時改為該路徑。Session 不再跨請求快取；經鎖更新／刪除後，下次驗證便失效，既有 SSE 最遲在五秒驗證週期停止。停止服務後再手動刪除可避免與登入寫入競爭。
+此命令從 ENV／install.json 辨識原 DATA_DIR，核對服務已停止與資料歸屬，先完成交易復原，再以共用儲存層清空 session。復原失敗時會保留交易日誌並停止撤銷，需先修復資料；不可只刪 sessions.json，以免舊交易將登入還原。下次登入驗證立即使用最新儲存資料；既有 SSE 在正常情況下最多五秒後停止。
 
 ## 故障排查
 

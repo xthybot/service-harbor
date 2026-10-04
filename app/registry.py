@@ -77,8 +77,11 @@ def service_metadata() -> dict[str, dict]:
     return result
 
 
-def update_service(service_id: str, body: dict) -> dict:
-    from .catalog import SERVICE_BY_ID
+CATEGORIES = {'Websites', 'Tools', 'Automation', 'Gateways', 'Monitoring', 'Network', 'Remote Access', 'Management', 'Other'}
+
+
+def normalize_service_fields(body: dict) -> dict:
+    """One set of stored-field invariants for add/edit/settings/import."""
     name = ' '.join(body.get('display_name', '').split())
     category = body.get('category')
     description = body.get('description', '').strip()
@@ -107,6 +110,17 @@ def update_service(service_id: str, body: dict) -> dict:
             raise ValueError('Enter a valid service scope and unit.')
         if port is not None and not unit:
             raise ValueError('A systemd unit is required to assign a service port.')
+    return {**body, 'display_name': name, 'description': description, 'category': category,
+            'service_type': kind, 'scope': scope, 'unit': unit, 'host_id': host_id,
+            'open_url': url, 'port': port}
+
+
+def update_service(service_id: str, body: dict) -> dict:
+    from .catalog import SERVICE_BY_ID
+    body = normalize_service_fields(body)
+    name, description, category = body['display_name'], body['description'], body['category']
+    kind, scope, unit, host_id = (body[k] for k in ('service_type', 'scope', 'unit', 'host_id'))
+    port, url = body['port'], body['open_url']
     with LOCK:
         current = SERVICE_BY_ID[service_id]
         registered = service_id.startswith('svc-')
@@ -139,26 +153,9 @@ def update_service(service_id: str, body: dict) -> dict:
 
 def add_service(body: dict) -> dict:
     from .catalog import SERVICE_BY_ID
-    name = ' '.join(body.get('display_name', '').split())[:80]
-    if not name:
-        raise ValueError('Enter a display name.')
-    kind = body.get('service_type')
-    if kind not in {'local', 'remote', 'external'}:
-        raise ValueError('Choose Local, Remote SSH, or External URL.')
-    url = validate_url(body.get('open_url', ''))
-    host_id = body.get('host_id', 'local') if kind == 'remote' else 'local' if kind == 'local' else ''
-    scope = body.get('scope', 'user') if kind != 'external' else 'external'
-    unit = body.get('unit', '').strip() if kind != 'external' else ''
-    port = body.get('port') if kind != 'external' else None
-    if port is not None and not unit:
-        raise ValueError('A systemd unit is required to assign a service port.')
-    if port is not None and (type(port) is not int or not 1 <= port <= 65535):
-        raise ValueError('Port must be between 1 and 65535.')
-    if kind == 'external' and not url:
-        raise ValueError('External links require a website URL.')
-    if kind != 'external':
-        if scope not in {'user', 'system'} or (unit and not UNIT_PATTERN.fullmatch(unit)):
-            raise ValueError('Enter a valid service/socket unit and scope.')
+    body = normalize_service_fields(body)
+    name, kind, url = body['display_name'], body['service_type'], body['open_url']
+    host_id, scope, unit, port = (body[k] for k in ('host_id', 'scope', 'unit', 'port'))
     with LOCK:
         # Host mutation/deletion and registration share this lock.
         if kind == 'remote':

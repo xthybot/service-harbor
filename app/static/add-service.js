@@ -93,7 +93,7 @@
       feedback.textContent = submitted.unit && submitted.scope === 'system' ? '✓ Service added. System controls require exact sudo rules on its host. Registration does not start the service.' : '✓ Service added. Open Services to view it.';
       await refreshAll();
       await window.HostDashboard.refreshHosts();
-    } catch (error) { feedback.textContent = error.message; showToast(error.message, 'error'); }
+    } catch (error) { if (!error.stale) { feedback.textContent = error.message; showToast(error.message, 'error'); } }
     finally { registering = false; render(); }
   });
   window.addEventListener('dashboard:hosts', event => {
@@ -112,5 +112,6 @@
     if (previous === 'external' || hosts.some(host => host.id === previous)) select.value = previous;
     render();
   });
+  window.HostDashboard.registerCleanup(() => { form.reset(); feedback.textContent = ''; hosts = []; registering = false; render(); });
   render();
 })();

@@ -215,7 +215,7 @@ class SessionSafety(unittest.TestCase):
         from scripts import lifecycle
         from unittest.mock import patch
         import io
-        old={'DASHBOARD_PASSWORD':'valid-old'}
+        old={'DASHBOARD_PASSWORD':'valid-old', 'DASHBOARD_DATA_DIR': str(lifecycle.APP / 'data')}
         with patch.object(lifecycle.getpass,'getpass',side_effect=['x'*257,'ok','ok']) as getpass, patch('builtins.input',side_effect=['','','','y']), patch('sys.stdout',new_callable=io.StringIO) as out:
             values,mode=lifecycle.get_settings(old,{},True)
         self.assertEqual(values['DASHBOARD_PASSWORD'],'ok')
@@ -338,6 +338,30 @@ class HTTPAcceptance(unittest.TestCase):
         record['display_name']='Edited'
         self.assertTrue(self.request('/api/services/'+entry['source_id']+'/edit',record,'PUT')['ok'])
         self.assertEqual(self.request('/api/services/export?selection=service&value='+entry['source_id'])['services'][0]['display_name'],'Edited')
+
+    def test_http_import_requires_current_preview_for_overwrite(self):
+        import urllib.request, urllib.error, json
+        record={'service_type':'external','scope':'external','unit':'','display_name':'HTTP Revision',
+                'category':'Websites','open_url':'https://revision.example.com','favorite':False,
+                'description':'isolated','port':None,'source_id':'http-revision-example'}
+        document={'format':'host-service-dashboard-services','version':1,'services':[record]}
+        preview=self.request('/api/services/import/preview',document)
+        self.assertEqual(preview['conflicts'],[])
+        self.assertEqual(self.request('/api/services/import?overwrite=false',document)['added'],1)
+        payload=json.dumps(document).encode()
+        url=self.base+'/api/services/import?overwrite=true'
+        for token in (None,preview['preview_token']):
+            headers={'Origin':self.base,'Cookie':self.cookie,'Content-Type':'application/json'}
+            if token:headers['X-Import-Preview']=token
+            request=urllib.request.Request(url,data=payload,headers=headers,method='POST')
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request,timeout=5)
+            self.assertEqual(caught.exception.code,409)
+        fresh=self.request('/api/services/import/preview',document)
+        request=urllib.request.Request(url,data=payload,headers={'Origin':self.base,'Cookie':self.cookie,
+            'Content-Type':'application/json','X-Import-Preview':fresh['preview_token']},method='POST')
+        with urllib.request.urlopen(request,timeout=5) as response:
+            self.assertEqual(json.load(response)['updated'],1)
 
     def test_api_password_and_size_rejection(self):
         import urllib.error,urllib.request

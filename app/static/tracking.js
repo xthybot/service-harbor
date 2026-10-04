@@ -118,7 +118,7 @@
     render();
   }
   window.addEventListener('dashboard:inventory',event=>{services=event.detail.services;ports=event.detail.ports;ready=event.detail.loaded && document.getElementById("login-screen").hidden;render();});
-  window.addEventListener('dashboard:logout',()=>{ready=false;for(const controller of pending.values())controller.abort();});
+  window.addEventListener('dashboard:logout',()=>{ready=false;services=[];ports=[];messages.clear();closeMenus();for(const controller of pending.values())controller.abort();});
   window.addEventListener('pagehide',()=>{ready=false;for(const controller of pending.values())controller.abort();});
   window.addEventListener('pageshow',event=>{if(event.persisted){entries=read();ready=document.getElementById('login-screen').hidden;tick();}});
   window.addEventListener('storage',event=>{if(event.key!==key)return;entries=read();for(const [token,controller] of pending)if(!entries.some(e=>canonical(e.kind,e.id)===token))controller.abort();render();});

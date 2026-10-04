@@ -3,7 +3,7 @@
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const { api, showToast } = window.HostDashboard;
-  let hosts = [], services = [], editId = null, trustTarget = null, loading = false;
+  let hosts = [], services = [], editId = null, trustTarget = null, loading = false, reloadRequested = false;
   let resolveConfirm = null, hostSaving = false;
   const busy = new Set();
 
@@ -61,13 +61,14 @@
   }
 
   async function load() {
-    if ($('#app-shell').hidden || loading) return;
+    if ($('#app-shell').hidden) return;
+    if (loading) { reloadRequested = true; return; }
     loading = true;
     try {
       const [data, key] = await Promise.all([api('/api/hosts'), api('/api/ssh-key')]);
       hosts = data.hosts || []; displayKey(key); render();
     } catch (error) { showToast(error.message, 'error'); }
-    finally { loading = false; }
+    finally { loading = false; if (reloadRequested) { reloadRequested = false; load(); } }
   }
   window.HostDashboard.refreshHosts = load;
 
@@ -107,7 +108,7 @@
     [...form.elements].forEach(field => { field.disabled = true; });
     try {
       await api(submittedId ? `/api/hosts/${submittedId}` : '/api/hosts', {method:submittedId ? 'PUT' : 'POST',body:JSON.stringify(body)});
-      closeHostForm(true); showToast('Host saved. Verify its fingerprint before connecting.'); await load();
+      closeHostForm(true); showToast('Host saved. Verify its fingerprint before connecting.'); await load(); await window.HostDashboard.refreshAll();
     } catch (error) { showToast(error.message,'error'); }
     finally { hostSaving = false; button.textContent = originalLabel; [...form.elements].forEach(field => { field.disabled = false; }); }
   });
@@ -146,13 +147,13 @@
       }else if(action==='check'){
         const result=await api(`/api/hosts/${host.id}/check`,{method:'POST'});
         showToast(result.host.connection==='Connected'?'SSH connection verified.':'SSH connection failed. See host details.',result.host.connection==='Connected'?'success':'error');await load();await window.HostDashboard.refreshAll();
-      }else if(action==='delete'){await api(`/api/hosts/${host.id}`,{method:'DELETE'});showToast('Host removed.');await load();}
+      }else if(action==='delete'){await api(`/api/hosts/${host.id}`,{method:'DELETE'});showToast('Host removed.');await load();await window.HostDashboard.refreshAll();}
     }catch(error){showToast(error.message,'error');}
     finally{busy.delete(host.id);render();}
   });
   window.addEventListener('dashboard:ready',load);
-  window.addEventListener('dashboard:services',event=>{services=event.detail;render();});
+  window.addEventListener('dashboard:inventory',event=>{services=event.detail.services;render();});
   window.addEventListener('hashchange',()=>{if(['#hosts','#add-service'].includes(location.hash))load();});
-  window.addEventListener('dashboard:logout',()=>{closeTrust();settleConfirm(false);closeHostForm(true);$('#host-help-modal').close();});
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeTrust();settleConfirm(false);}});
+  window.addEventListener('dashboard:logout',()=>{hosts=[];services=[];reloadRequested=false;busy.clear();displayKey({});render();closeTrust();settleConfirm(false);closeHostForm(true);$('#host-help-modal').close();});
+
 })();

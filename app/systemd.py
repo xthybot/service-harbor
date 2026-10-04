@@ -2,6 +2,8 @@
 
 import asyncio
 import anyio
+import hashlib
+import json
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -119,6 +121,7 @@ def get_services(only_id: str | None = None) -> list[dict]:
         if missing_unit and not record['error']:
             record['error'] = 'Systemd unit not found or could not be loaded on this host.'
         rows.append({**entry,
+            'execution_identity': journal_identity(entry['id']),
             'unit': entry.get('unit', entry['id']) if not external else '',
             'service_type': entry.get('service_type', 'local'),
             'host_name': host.get('name', 'This host') if not external else 'External website',
@@ -168,11 +171,14 @@ def get_status(service_id: str) -> str:
     service = SERVICE_BY_ID[service_id]
     if not is_managed(service):
         return f"Service: {service['name']}\nLocation: {service.get('service_type', 'local')}\nSystemd unit: Not configured\nStatus monitoring, journal logs and controls are unavailable."
+    identity = journal_identity(service_id)
     result = _execute(service, _systemctl(service_id, 'status', '--no-pager', '-n', '35'))
+    if not _identity_matches(service_id, identity):
+        raise ValueError('Service identity changed while loading status; reload the service.')
     return (result.stdout or result.stderr).strip() or 'No status output available.'
 
 
-def _journal_command(service_id: str, lines: int, follow: bool = False) -> list[str]:
+def _journal_command(service_id: str, lines: int, follow: bool = False, *, cursor: str = "", json_output: bool = False) -> list[str]:
     if service_id not in SERVICE_BY_ID:
         raise ValueError("Unknown service")
     unit = SERVICE_BY_ID[service_id]
@@ -181,7 +187,22 @@ def _journal_command(service_id: str, lines: int, follow: bool = False) -> list[
     args = ["/usr/bin/journalctl"]
     if unit["scope"] == "user":
         args.append("--user")
-    args.extend(["-u", _unit(unit), "-n", str(max(1, min(lines, MAX_LOG_LINES))), "--no-pager", "-o", "short-iso"])
+    cursor = validate_journal_cursor(cursor)
+    # With a cursor, include its entry once to verify it still exists. The event
+    # adapter discards only that exact cursor, never equal message text.
+    # With --cursor, --no-tail starts at that exact entry and streams every
+    # following record. Combining --cursor with a fixed -n can silently skip
+    # earlier records when more than n arrived while disconnected.
+    args.extend(["-u", _unit(unit), "--no-pager", "-o", "json" if json_output else "short-iso"])
+    if cursor and follow:
+        args.append('--no-tail')
+    else:
+        count = 0 if follow and not cursor else max(1, min(lines, MAX_LOG_LINES))
+        args.extend(['-n', str(count)])
+    if json_output:
+        args.append("--output-fields=MESSAGE,SYSLOG_IDENTIFIER,_COMM,_PID,PRIORITY")
+    if cursor:
+        args.append("--cursor=" + cursor)
     if follow:
         args.append("--follow")
     if unit.get("service_type") == "remote":
@@ -200,24 +221,155 @@ def get_recent_logs(service_id: str, lines: int = 200, query: str = "") -> list[
     return output[-max(1, min(lines, MAX_LOG_LINES)):]
 
 
-async def stream_logs(service_id: str, lines: int = 100, *, session_valid=None, disconnected=None, check_interval=5.0):
-    """Poll authorization even while journal/SSH produces no output."""
+def validate_journal_cursor(cursor: str) -> str:
+    """Opaque journal cursors may not inject options, transport or SSE framing."""
+    if not isinstance(cursor, str) or len(cursor) > 4096 or any(not 32 < ord(c) < 127 for c in cursor):
+        raise ValueError("Invalid journal cursor")
+    return cursor
+
+
+def journal_identity(service_id: str) -> str:
+    """Execution identity, including transport/trust; display-only edits are safe."""
+    from .storage import LOCK
+    with LOCK:
+        try:
+            service = SERVICE_BY_ID[service_id]
+        except KeyError as error:
+            raise ValueError("Service identity changed or service was removed.") from error
+        values = {key: service.get(key) for key in ('scope', 'host_id', 'service_type')}
+        values.update(unit=service.get('unit', service['id']), managed=is_managed(service))
+        if service.get('service_type') == 'remote':
+            host = registry.host(service['host_id'])
+            values['host'] = {key: host.get(key) for key in ('address', 'port', 'username', 'trusted', 'host_key', 'fingerprint')}
+        return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+
+
+def _identity_matches(service_id: str, expected: str) -> bool:
+    try:
+        return journal_identity(service_id) == expected
+    except (ValueError, KeyError):
+        return False
+
+
+def _journal_text(value) -> str:
+    if isinstance(value, list):
+        if all(isinstance(part, int) and 0 <= part <= 255 for part in value):
+            return bytes(value).decode('utf-8', errors='replace')
+        return ' '.join(str(part) for part in value)
+    return str(value) if value is not None else ''
+
+
+def _journal_record(raw: str) -> dict | None:
+    try:
+        entry = json.loads(raw)
+        if not isinstance(entry, dict):
+            return None
+        cursor = validate_journal_cursor(entry.get('__CURSOR', ''))
+        if not cursor:
+            return None
+        timestamp = datetime.fromtimestamp(int(entry['__REALTIME_TIMESTAMP']) / 1000000, timezone.utc).isoformat(timespec='seconds')
+    except (ValueError, TypeError, KeyError, OverflowError, OSError):
+        return None
+    name = _journal_text(entry.get('SYSLOG_IDENTIFIER') or entry.get('_COMM'))
+    pid = _journal_text(entry.get('_PID'))
+    name += f'[{pid}]' if pid else ''
+    message = _journal_text(entry.get('MESSAGE'))
+    priority = str(entry.get('PRIORITY', ''))
+    level = 'ERROR ' if priority in {'0', '1', '2', '3'} else 'WARNING ' if priority == '4' else ''
+    line = f"{timestamp} {name + ': ' if name else ''}{level}{message}"
+    return {'event': 'message', 'line': line, 'cursor': cursor}
+
+
+def get_recent_log_snapshot(service_id: str, lines: int = 200, query: str = "") -> dict:
+    from .storage import LOCK
+    with LOCK:
+        identity = journal_identity(service_id)
+        command = _journal_command(service_id, lines, json_output=True)
+    # External I/O must not hold the global storage lock.
+    result = _run(command, timeout=15)
+    if not _identity_matches(service_id, identity):
+        raise ValueError('Service identity changed while loading logs; reload the service.')
+    records = []
+    diagnostics = []
+    for raw in result.stdout.splitlines():
+        entry = _journal_record(raw)
+        if entry:
+            records.append(entry)
+        elif raw.strip():
+            diagnostics.append(raw[:1200])
+    if result.stderr.strip():
+        diagnostics.append(result.stderr.strip()[:1200])
+    output = [entry['line'] for entry in records]
+    if query:
+        output = [line for line in output if query.casefold() in line.casefold()]
+    snapshot = {'lines': output[-max(1, min(lines, MAX_LOG_LINES)):],
+                'cursor': records[-1]['cursor'] if records else None, 'identity': identity}
+    if diagnostics or result.returncode:
+        snapshot['gap'] = 'Journal continuity unavailable: ' + ('; '.join(diagnostics) or 'journalctl failed.')
+    return snapshot
+
+
+def encode_log_event(event: dict) -> str:
+    kind = event.get('event', 'message')
+    prefix = '' if kind == 'message' else f'event: {kind}\n'
+    if event.get('cursor'):
+        prefix += 'id: ' + validate_journal_cursor(event['cursor']) + '\n'
+    body = {key: value for key, value in event.items() if key not in {'event', 'cursor'}}
+    return prefix + 'data: ' + json.dumps(body, ensure_ascii=False) + '\n\n'
+
+
+async def stream_logs(service_id: str, lines: int = 100, *, session_valid=None, disconnected=None,
+                      check_interval=5.0, structured=False, cursor='', identity=''):
+    """Poll authorization and execution identity even while journal/SSH is silent.
+
+    Structured consumers resume using the journal's identity, not message text.
+    Legacy plain-text consumers retain their existing interface.
+    """
     if session_valid is not None and not await asyncio.to_thread(session_valid):
         return
+    expected = None
+    if structured:
+        validate_journal_cursor(cursor)
+        try:
+            expected = await asyncio.to_thread(journal_identity, service_id)
+        except (ValueError, KeyError):
+            yield {'event': 'identity_changed', 'message': 'Service was changed or removed. Reload its details.'}
+            return
+        if identity and expected != identity:
+            yield {'event': 'identity_changed', 'message': 'Service identity changed. Reload its details.'}
+            return
+        def prepare():
+            from .storage import LOCK
+            with LOCK:
+                if not _identity_matches(service_id, expected):
+                    return None
+                return _journal_command(service_id, lines, follow=True, cursor=cursor, json_output=True)
+        command = await asyncio.to_thread(prepare)
+        if command is None:
+            yield {'event': 'identity_changed', 'message': 'Service identity changed. Reload its details.'}
+            return
+    else:
+        command = _journal_command(service_id, lines, follow=True)
     process = await asyncio.create_subprocess_exec(
-        *_journal_command(service_id, lines, follow=True),
+        *command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
     read_task = None
+    first_record = True
     try:
         assert process.stdout
         deadline = 0.0
+        if structured and not cursor:
+            yield {'event': 'gap', 'message': 'No journal cursor available; continuity with earlier logs cannot be verified.'}
         while True:
             now = asyncio.get_running_loop().time()
             if now >= deadline:
                 if session_valid is not None and not await asyncio.to_thread(session_valid): break
                 if disconnected is not None and await disconnected(): break
+                if expected is not None and not await asyncio.to_thread(_identity_matches, service_id, expected):
+                    yield {'event': 'identity_changed', 'message': 'Service or SSH host changed. Reload its details.'}
+                    break
                 deadline = asyncio.get_running_loop().time() + check_interval
             if read_task is None:
                 read_task = asyncio.create_task(process.stdout.readline())
@@ -226,8 +378,29 @@ async def stream_logs(service_id: str, lines: int = 100, *, session_valid=None, 
             except asyncio.TimeoutError:
                 continue
             read_task = None
-            if not data: break
-            yield data.decode("utf-8", errors="replace").rstrip("\r\n")
+            if not data:
+                if structured and first_record:
+                    yield {'event': 'gap', 'message': 'Journal stream ended before its cursor could be verified; continuity is unknown.'}
+                break
+            raw = data.decode("utf-8", errors="replace").rstrip("\r\n")
+            if not structured:
+                yield raw
+                continue
+            # A cross-tab mutation must not leak buffered old-unit output.
+            if not await asyncio.to_thread(_identity_matches, service_id, expected):
+                yield {'event': 'identity_changed', 'message': 'Service or SSH host changed. Reload its details.'}
+                break
+            event = _journal_record(raw)
+            if event is None:
+                yield {'event': 'gap', 'message': 'Journal continuity unavailable: ' + raw[:1200]}
+                continue
+            if first_record:
+                first_record = False
+                if cursor:
+                    if event['cursor'] == cursor:
+                        continue
+                    yield {'event': 'gap', 'message': 'Previous journal cursor is no longer available; some events may be missing.'}
+            yield event
     finally:
         # ASGI disconnect cancels the enclosing AnyIO scope; cleanup must still finish.
         with anyio.CancelScope(shield=True):

@@ -2,7 +2,7 @@
 
 ## 前置需求
 
-Ubuntu Server、systemd、Python 3（專案目前使用 Ubuntu 24.04／Python 3.12）、OpenSSH client，以及所選安裝入口需要的 venv／pip 或 uv。以實際執行 Dashboard 的**一般使用者**操作，不要 `sudo bash scripts/setup.sh`；腳本拒絕 root 執行，以免建立 root 擁有的資料／虛擬環境。
+Ubuntu Server、systemd、Python 3（目前隔離測試於 Ubuntu 24.04.3 LTS／Python 3.12.3 執行；其他 Ubuntu／Python 組合尚未完整驗證）、OpenSSH client，以及所選安裝入口需要的 venv／pip 或 uv。以實際執行 Dashboard 的**一般使用者**操作，不要 `sudo bash scripts/setup.sh`；腳本拒絕 root 執行，以免建立 root 擁有的資料／虛擬環境。
 
 腳本不安裝 apt 套件。缺少 Python venv／ensurepip 時會說明需要 `python3-venv`；缺少 ssh、ssh-keygen、ssh-keyscan 時需要 `openssh-client`。先由管理員確認並安裝缺少套件，再重跑。Python 套件依 `requirements.txt` 安裝至專案 `.venv/`，pip／uv 安裝進度會直接顯示。
 
@@ -63,7 +63,7 @@ cd "$HOME/host-service-dashboard"
 bash scripts/setup.sh
 ```
 
-安裝器使用實際專案絕對路徑，不再強制只能位於上述目錄。專案、設定和資料的管理路徑不得使用 symlink；同一帳號／設定目錄只管理一套同名 Dashboard。移動既有專案前，應先備份、移除舊安裝並在新位置重裝。
+安裝器使用實際專案絕對路徑，不再強制只能位於上述目錄。專案、設定和資料的管理路徑不得使用 symlink 或含 `..`；同一帳號／設定目錄只管理一套同名 Dashboard。若自訂 `XDG_CONFIG_HOME`，安裝器會核對正在執行的 user manager 的 UnitPath 是否包含實際固定單元目錄 `~/.config/systemd/user/`；不一致時先修正 manager 設定，不會寫入一個 user manager 找不到的單元。移動既有專案前，應先備份、移除舊安裝並在新位置重裝。
 
 安裝時依序詢問：
 
@@ -107,9 +107,9 @@ sudo systemctl restart host-service-dashboard.service
 
 ### 模式切換與失敗處理
 
-重跑 setup 或 reset 可選另一種模式。只處理同一安裝來源的 Dashboard unit，不停止其他被管理的服務。新單元啟動確認成功後才移除舊模式單元，避免兩套同時運作。
+重跑 setup 或 reset 可選另一種模式。只處理同一安裝來源的 Dashboard unit，不停止其他被管理的服務。先停止已擁有的舊單元，新單元啟動確認成功後才移除舊模式單元，避免兩套同時運作。
 
-在停止舊 Dashboard 之後發生錯誤，腳本會嘗試停止新單元並還原原有環境檔、安裝紀錄、登入 session、Dashboard Port 覆寫及單元的啟用／執行狀態。請閱讀失敗訊息；sudo 認證失效等問題也可能使回復未完成。pip／uv 套件更新及已啟用 linger 不會自動回退。
+在停止舊 Dashboard 之後發生錯誤，腳本會逐項嘗試停止新單元、復原資料交易、還原環境檔／安裝紀錄／Port 覆寫及原單元設定。出於安全考量舊登入 session 不恢復；若資料復原或單元／設定回復失敗，不會重啟舊服務。請閱讀失敗訊息；sudo 認證失效等問題也可能使回復未完成。pip／uv 套件更新及已啟用 linger 不會自動回退；記憶體中的回復快照只涵蓋執行中失敗，不能保證斷電後整個安裝流程可自動復原。
 
 ## 重置（保留服務與金鑰）
 
@@ -130,12 +130,16 @@ bash scripts/uninstall.sh
 腳本先辨識由此專案安裝的 user／system 單元，列出刪除清單，需輸入完整 `REMOVE` 才執行：
 
 - 停止、停用並刪除 Dashboard 單元，重新載入對應 systemd manager。
-- 刪除密碼環境檔、install.json、舊版 setup 產生的本機 sudoers **候選檔**。
+- 完成資料清除後才刪除密碼環境檔與 install.json；移除舊版 setup 產生的本機 sudoers **候選檔**。中途失敗保留原資料位置紀錄，重跑會繼續。
 - 刪除專案 `data/`（包含 Hosts、服務、session、SSH 私鑰及 known_hosts）與 `.venv/`。
-- 若使用自訂 `DASHBOARD_DATA_DIR`，只刪除已知 Dashboard JSON 檔與 `ssh/`，不遞迴刪除整個外部目錄或其他不明檔案。
+- 自訂 `DASHBOARD_DATA_DIR` 只刪已知 Dashboard JSON、專用 SSH key 與 hosts.json 中登記的 pinned known_hosts，不遞迴刪除外部目錄或混用 ssh/ 的未知檔案。
 - 原始碼、其他服務、系統 journal、現有 `/etc/sudoers.d` 規則、帳號群組、linger 與防火牆設定皆保留。
 
 不自動停用 linger，因為該帳號的其他 user services 可能依賴它。此版未建立 sudoers，故不刪除管理員既有的權限設定。遠端主機 `authorized_keys` 的舊公鑰需自行移除；重新安裝產生的新 key 必須重新部署至遠端。瀏覽器 localStorage 的追蹤倒數屬於瀏覽器資料，主機移除腳本不會清除它。
+
+清理前核對 data 目錄的 `.dashboard-owner.json` 所屬專案／帳號／UID／路徑與 install.json、dashboard.env 的 DATA_DIR。舊安裝若尚無 ownership 標記，先停止 Dashboard、核對資料路徑，再執行 `python3 scripts/lifecycle.py adopt-data`，輸入 `ADOPT` 後才可重跑 setup／reset／uninstall。這一步不會清除資料。若檔案路徑含 `..`、symlink、共享系統根目錄，或 ENV／receipt 不一致，腳本會拒絕執行；先人工核對並修正原始記錄。
+
+若需離線撤銷所有登入：先停止 Dashboard，再執行 `python3 scripts/lifecycle.py revoke-sessions`。此命令先經共用儲存層完成未結束交易的復原，再寫入空 sessions.json；不可直接刪交易日誌。
 
 再次安裝只需執行 `bash scripts/setup.sh`。不需要刪除 git repository。
 
@@ -150,3 +154,7 @@ sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp
 新安裝只有 Dashboard 自身。可透過 Add service 新增，或修改 `examples/services.json` 的虛構設定後匯入；不會安裝、啟動範例 unit。既有主機的私密 `local-catalog.json` 不隨 Git 發布。獨立裝置監控是另外部署的選用服務，並不隨安裝器自動建立。
 
 私密資料不包含在 GitHub 程式碼中；請勿分享 `.venv`、密碼環境檔、`data/` 或含金鑰的備份。設定檔格式、讀取權限與控制授權詳見 [設定參考](CONFIGURATION.zh-TW.md)。
+
+## 目前驗證範圍
+
+此版在 Ubuntu 24.04.3 LTS、Python 3.12.3 上執行隔離的 lifecycle 模擬測試；涵蓋 venv／uv 路徑、systemd/sudo 模擬、清理失敗重試及回復錯誤。未在正式主機執行完整重裝、模式遷移、移除或開機後登入前啟動測試。其他 Ubuntu／Python 版本需先於一次性環境驗證相同流程；請勿將「Ubuntu」概括為全部版本已驗證。

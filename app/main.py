@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import copy
 from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -77,6 +78,8 @@ class ManualPortBody(BaseModel):
 def _safe_call(function, *args):
     try:
         return function(*args)
+    except config_transfer.ImportConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except (ValueError, KeyError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except subprocess.TimeoutExpired as error:
@@ -116,7 +119,7 @@ def login(body: LoginBody, request: Request, response: Response):
 def logout(request: Request, response: Response, _token: str = Depends(_authenticated)):
     security.require_same_origin(request)
     security.logout(request.cookies.get(security.SESSION_COOKIE))
-    response.delete_cookie(security.SESSION_COOKIE, path="/", httponly=True, samesite="strict", secure=COOKIE_SECURE)
+    # Revocation is authoritative. A late Set-Cookie deletion could erase a newer login.
     return {"ok": True}
 
 def _decorate_services(rows: list[dict]) -> list[dict]:
@@ -180,7 +183,7 @@ async def preview_services_import(request: Request, _token: str = Depends(_authe
 @app.post('/api/services/import')
 async def import_services(request: Request, overwrite: bool = False, _token: str = Depends(_authenticated)):
     document = await _read_service_config(request)
-    return await run_in_threadpool(_safe_call, config_transfer.import_config, document, overwrite, False)
+    return await run_in_threadpool(_safe_call, config_transfer.import_config, document, overwrite, False, request.headers.get('x-import-preview'))
 
 @app.put("/api/services/{service_id}/settings")
 def set_service_settings(service_id: str, body: ServiceSettingsBody, request: Request, _token: str = Depends(_authenticated)):
@@ -202,32 +205,62 @@ def set_service_settings(service_id: str, body: ServiceSettingsBody, request: Re
                 "configured_port": service_ports.get_ports().get(service_id, SERVICE_BY_ID[service_id].get("port"))}
 
 
+def _service_snapshot(service_id):
+    """Raw editable record under the caller's short lock, including invalid legacy values."""
+    entry = copy.deepcopy(SERVICE_BY_ID[service_id])
+    return (entry,
+            service_names.get_names().get(service_id),
+            service_urls.get_urls().get(service_id),
+            service_ports.get_ports().get(service_id),
+            service_id in service_favorites.get_favorites())
+
+
+def _probe_host_snapshot(candidate):
+    if candidate['service_type'] != 'remote':
+        return None
+    host = registry.host(candidate['host_id'])
+    if candidate['unit'] and not host.get('trusted'):
+        raise ValueError('Confirm this host fingerprint in Hosts first.')
+    return {key: host.get(key) for key in ('id', 'address', 'username', 'port', 'trusted', 'fingerprint', 'host_key')}
+
+
+def _probe_is_current(candidate, host_snapshot, service_id=None, service_snapshot=None):
+    try:
+        unchanged = _probe_host_snapshot(candidate) == host_snapshot
+        if service_id is not None:
+            unchanged = unchanged and _service_snapshot(service_id) == service_snapshot
+    except (KeyError, ValueError):
+        unchanged = False
+    if not unchanged:
+        raise HTTPException(status_code=409, detail='Service or host changed during verification. Reload and try again.')
+
+
 @app.put('/api/services/{service_id}/edit')
 def edit_service(service_id: str, body: AddServiceBody, request: Request, _token: str = Depends(_authenticated)):
-    with storage.transaction():
-        security.require_same_origin(request)
-        try:
-            current = SERVICE_BY_ID[service_id]
-            candidate = body.model_dump()
-            candidate['unit'] = body.unit.strip()
-            old_identity = (current.get('service_type', 'local'), current.get('host_id', 'local'),
-                            current['scope'], current.get('unit', current['id']))
-            new_identity = (body.service_type, body.host_id if body.service_type == 'remote' else
-                            '' if body.service_type == 'external' else 'local',
-                            'external' if body.service_type == 'external' else body.scope, candidate['unit'])
-            if service_id.startswith('svc-') and candidate['unit'] and new_identity != old_identity:
-                probe = {**candidate, 'id': service_id}
-                _safe_call(systemd.inspect_unit, probe)
+    security.require_same_origin(request)
+    try:
+        candidate = registry.normalize_service_fields(body.model_dump())
+        with storage.LOCK:
+            snapshot = _service_snapshot(service_id)
+            host_snapshot = _probe_host_snapshot(candidate)
+        current = snapshot[0]
+        old_identity = (current.get('service_type', 'local'), current.get('host_id', 'local'),
+                        current['scope'], current.get('unit', current['id']))
+        new_identity = tuple(candidate[k] for k in ('service_type', 'host_id', 'scope', 'unit'))
+        if service_id.startswith('svc-') and candidate['unit'] and new_identity != old_identity:
+            _safe_call(systemd.inspect_unit, {**candidate, 'id': service_id})
+        with storage.transaction():
+            _probe_is_current(candidate, host_snapshot, service_id, snapshot)
             registry.update_service(service_id, candidate)
-            service_names.set_display_name(service_id, body.display_name)
-            service_urls.set_url(service_id, body.open_url)
-            service_ports.set_port(service_id, body.port)
+            service_names.set_display_name(service_id, candidate['display_name'])
+            service_urls.set_url(service_id, candidate['open_url'])
+            service_ports.set_port(service_id, candidate['port'])
             service_favorites.set_favorite(service_id, body.favorite)
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail='Unknown service') from error
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
         return {'ok': True, 'id': service_id}
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail='Unknown service') from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 @app.put("/api/services/{service_id}/display-name")
 def set_service_display_name(service_id: str, body: ServiceNameBody, request: Request, _token: str = Depends(_authenticated)):
@@ -328,23 +361,28 @@ def status(service_id: str, _token: str = Depends(_authenticated)):
 def recent_logs(service_id: str, lines: int = 200, query: str = "", _token: str = Depends(_authenticated)):
     if service_id not in SERVICE_BY_ID:
         raise HTTPException(status_code=404, detail="Unknown service")
-    return {"lines": _safe_call(systemd.get_recent_logs, service_id, lines, query)}
+    return _safe_call(systemd.get_recent_log_snapshot, service_id, lines, query)
 
 @app.get("/api/services/{service_id}/logs/stream")
-def log_stream(service_id: str, request: Request, lines: int = 100, _token: str = Depends(_authenticated)):
+def log_stream(service_id: str, request: Request, lines: int = 0, cursor: str = '', identity: str = '',
+               _token: str = Depends(_authenticated)):
     if service_id not in SERVICE_BY_ID:
         raise HTTPException(status_code=404, detail="Unknown service")
-    _safe_call(systemd._journal_command, service_id, lines, True)
+    cursor = _safe_call(systemd.validate_journal_cursor, request.headers.get('last-event-id') or cursor)
+    if len(identity) > 64 or any(c not in '0123456789abcdef' for c in identity):
+        raise HTTPException(status_code=400, detail='Invalid service identity')
     async def events():
-        iterator = systemd.stream_logs(service_id, lines, session_valid=lambda: security.token_is_valid(_token), disconnected=request.is_disconnected)
+        iterator = systemd.stream_logs(service_id, lines, session_valid=lambda: security.token_is_valid(_token),
+                                       disconnected=request.is_disconnected, structured=True, cursor=cursor, identity=identity)
         try:
-            async for line in iterator:
+            async for event in iterator:
                 if await request.is_disconnected():
                     break
-                yield f"data: {json.dumps({'line': line}, ensure_ascii=False)}\n\n"
+                yield systemd.encode_log_event(event)
         finally:
             await iterator.aclose()
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 @app.get('/api/ssh-key')
 def get_ssh_key(_token: str = Depends(_authenticated)):
@@ -395,22 +433,20 @@ def check_host(host_id: str, request: Request, _token: str = Depends(_authentica
 
 @app.post('/api/services')
 def register_service(body: AddServiceBody, request: Request, _token: str = Depends(_authenticated)):
+    security.require_same_origin(request)
+    candidate = _safe_call(registry.normalize_service_fields, body.model_dump())
+    with storage.LOCK:
+        host_snapshot = _safe_call(_probe_host_snapshot, candidate)
+    if candidate['service_type'] != 'external' and candidate['unit']:
+        # Slow systemctl/SSH work must never hold the JSON storage lock.
+        _safe_call(systemd.inspect_unit, {**candidate, 'id': candidate['unit']})
     with storage.transaction():
-        security.require_same_origin(request)
-        candidate = body.model_dump()
-        candidate['unit'] = body.unit.strip()
-        if body.service_type != 'external' and candidate['unit']:
-            # Read-only existence check; registration never creates or starts a unit.
-            probe = {**candidate, 'id': candidate['unit']}
-            if body.service_type == 'remote':
-                _safe_call(registry.host, body.host_id)
-            if body.scope not in {'user', 'system'} or not registry.UNIT_PATTERN.fullmatch(candidate['unit']):
-                raise HTTPException(status_code=400, detail='Enter a valid systemd unit and scope.')
-            _safe_call(systemd.inspect_unit, probe)
+        _probe_is_current(candidate, host_snapshot)
+        # add_service rechecks host trust, duplicates and capacity in this transaction.
         entry = _safe_call(registry.add_service, candidate)
         if body.favorite:
             service_favorites.set_favorite(entry['id'], True)
-        return {'service': entry, 'ok': True}
+    return {'service': entry, 'ok': True}
 
 @app.delete('/api/services/{service_id}')
 def unregister_service(service_id: str, request: Request, _token: str = Depends(_authenticated)):

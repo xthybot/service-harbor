@@ -1,26 +1,35 @@
 (() => {
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const state = { services: [], ports: [], portHosts: [], scope: "all", page: "overview", selected: null, selection: null, portFlash: null, selectionGeneration: 0, selectedTimer: null, selectedBusy: null, live: false, refreshGeneration: 0, updateVersion: 0, selectedUpdates: new Map(), renameTarget: null, renameGeneration: 0, portEditorTarget: null, logLines: [], eventSource: null, filterRefreshTimer: null, busy: new Set(), favoriteBusy: new Set(), confirmCleanup: null };
+  const state = { services: [], ports: [], portHosts: [], scope: "all", page: "overview", selected: null, selection: null, portFlash: null, selectionGeneration: 0, selectedTimer: null, selectedBusy: null, live: false, refreshGeneration: 0, updateVersion: 0, selectedUpdates: new Map(), renameTarget: null, renameGeneration: 0, portEditorTarget: null, logLines: [], eventSource: null, filterRefreshTimer: null, busy: new Set(), favoriteBusy: new Set(), confirmCleanup: null, logoutPending: false };
   let inventoryLoaded = false;
   const esc = (value = "") => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
-  async function api(path, options = {}) {
-    const response = await fetch(path, { credentials: "same-origin", ...options, headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) } });
-    if (response.status === 401) {
-      showLogin();
-      throw new Error("Your session expired. Please sign in again.");
-    }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(payload.detail || payload.message || `Request failed (${response.status})`);
-      error.status = response.status;
-      throw error;
-    }
-    return payload;
-  }
+  const cleanups = new Set();
+  const drawerLife = new window.HostAsync.Lifetime();
+  const logLife = new window.HostAsync.Lifetime();
+  const auth = new window.HostAsync.AuthLifecycle((path, options) => fetch(path, {credentials: "same-origin", ...options,
+    headers: {...(options.body ? {"Content-Type": "application/json"} : {}), ...(options.headers || {})}}),
+    () => showLogin("Your session expired. Please sign in again."));
+  const api = (path, options) => auth.request(path, options);
+  const executionIdentity = service => service?.execution_identity || JSON.stringify([service?.host_id, service?.scope, service?.unit, service?.managed]);
+  state.desiredFollow = false;
+  state.logCursor = null;
+  state.logIdentity = null;
+  state.drawerIdentity = null;
+  let sessionTimer = null;
 
-  function showLogin() {
+  function showLogin(message = "") {
+    auth.advance(false);
+    $("#app-shell").hidden = true;
+    $("#login-screen").hidden = false;
+    clearTimeout(sessionTimer);
+    state.refreshGeneration++;
+    state.confirmCleanup?.();
+    for (const cleanup of cleanups) cleanup();
+    $$("dialog[open]").forEach(dialog => dialog.close());
+    $$(".modal-backdrop").forEach(modal => { modal.hidden = true; });
+    $("#logout-retry").hidden = true;
     window.dispatchEvent(new Event("dashboard:logout"));
     clearSelection();
     state.live = false;
@@ -33,10 +42,22 @@
     closeServicePortEditor();
     $("#app-shell").hidden = true;
     $("#login-screen").hidden = false;
-    setTimeout(() => $("#login-password").focus(), 30);
+    state.services = []; state.ports = []; state.portHosts = [];
+    state.selectedUpdates.clear(); state.busy.clear(); state.favoriteBusy.clear();
+    inventoryLoaded = false;
+    state.logLines = []; state.logCursor = null; state.logIdentity = null;
+    $("#status-output").textContent = ""; $("#log-viewer").textContent = "";
+    $("#toast-region").replaceChildren();
+    renderSummary(); renderServices(); renderPorts();
+    $("#login-error").textContent = message;
+    $("#login-password").value = "";
+    $("#login-password").focus();
   }
 
   function showApp() {
+    auth.advance(true);
+    $("#logout-retry").hidden = true;
+    scheduleSessionCheck();
     $("#login-screen").hidden = true;
     $("#app-shell").hidden = false;
     $("#host-name").textContent = location.hostname || "This host";
@@ -46,7 +67,41 @@
     refreshAll();
   }
 
+  function scheduleSessionCheck() {
+    clearTimeout(sessionTimer);
+    if (!auth.authenticated) return;
+    sessionTimer = setTimeout(async () => {
+      await auth.checkSession();
+      if (auth.authenticated) scheduleSessionCheck();
+    }, 15000);
+  }
+
+  async function logout() {
+    if (state.logoutPending) return;
+    // Hide private UI immediately, but do not claim server revocation succeeded.
+    showLogin("Signing out…");
+    const logoutEpoch = auth.epoch;
+    state.logoutPending = true;
+    $("#login-form button[type=submit]").disabled = true;
+    $("#logout-retry").disabled = true;
+    try {
+      await api("/api/logout", {method: "POST", body: "{}"});
+      if (logoutEpoch !== auth.epoch) return;
+      $("#logout-retry").hidden = true;
+      $("#login-error").textContent = "Signed out.";
+    } catch (error) {
+      if (error.stale || logoutEpoch !== auth.epoch) return; // An obsolete response must not change newer UI.
+      $("#login-error").textContent = "Data hidden, but session revocation is not confirmed. Retry signing out.";
+      $("#logout-retry").hidden = false;
+    } finally {
+      state.logoutPending = false;
+      $("#login-form button[type=submit]").disabled = false;
+      $("#logout-retry").disabled = false;
+    }
+  }
+
   function showToast(message, kind = "success") {
+    if (!message || !auth.authenticated) return;
     const toast = document.createElement("div");
     toast.className = `toast${kind === "error" ? " toast-error" : ""}`;
     const text = document.createElement("span");
@@ -90,6 +145,7 @@
   }
 
   async function refreshAll() {
+    if (!auth.authenticated) return;
     const generation = ++state.refreshGeneration;
     const startedAtVersion = state.updateVersion;
     try {
@@ -125,7 +181,7 @@
       $("#updated-at").textContent = updatedAt;
       $("#services-updated-at").textContent = updatedAt;
     } catch (error) {
-      if (!$("#login-screen").hidden) return;
+      if (generation !== state.refreshGeneration || !$("#login-screen").hidden || error.stale) return;
       window.dispatchEvent(new CustomEvent("dashboard:refresh-result", {detail: {ok: false, message: error.message}}));
       showToast(error.message, "error");
     }
@@ -162,7 +218,7 @@
 
   async function checkSelection(generation) {
     const selected = state.selection;
-    if (!selected || generation !== state.selectionGeneration || state.selectedBusy === generation) return;
+    if (!auth.authenticated || !selected || generation !== state.selectionGeneration || state.selectedBusy === generation) return;
     if (window.HostTracking?.active(selected.kind, selected.id)) return;
     state.selectedBusy = generation;
     try {
@@ -319,7 +375,7 @@
     const restartDisabled = busy || service.status === "Stopped";
     const activeTime = service.status === "Running" ? formatTime(service.active_since) : "—";
     return `<article class="service-card${state.selection?.kind === "service" && state.selection.id === service.id ? " is-selected" : ""}" data-service-id="${esc(service.id)}" tabindex="0" aria-label="Open details for ${esc(displayName(service))}">
-      <div class="service-card-top"><div class="service-identity"><span class="service-mark ${service.scope === "system" ? "mark-system" : service.web ? "mark-web" : ""}">${esc(serviceInitial(service))}</span><div class="service-copy"><div class="service-title-line"><h3 data-open-detail="${esc(service.id)}" title="View service details">${esc(displayName(service))}</h3></div><p>${esc(service.description)}</p></div></div><div class="service-status-group"><span class="service-status-light ${statusClass(service.status)}" role="img" tabindex="0" aria-label="Status: ${esc(service.status)}" data-status="${esc(service.status)}"></span><button class="favorite-indicator${service.favorite ? " is-favorite" : ""}" type="button" data-toggle-favorite="${esc(service.id)}" aria-label="${service.favorite ? "Remove from favorites" : "Add to favorites"}" aria-pressed="${String(!!service.favorite)}" title="${service.favorite ? "Remove from favorites" : "Add to favorites"}">${service.favorite ? "★" : "☆"}</button></div></div>
+      <div class="service-card-top"><div class="service-identity"><span class="service-mark ${service.scope === "system" ? "mark-system" : service.web ? "mark-web" : ""}">${esc(serviceInitial(service))}</span><div class="service-copy"><div class="service-title-line"><h3 data-open-detail="${esc(service.id)}" title="View service details">${esc(displayName(service))}</h3></div><p>${esc(service.description)}</p></div></div><div class="service-status-group"><span class="service-status-light ${statusClass(service.status)}" role="img" tabindex="0" aria-label="Status: ${esc(service.status)}" data-status="${esc(service.status)}"></span><button class="favorite-indicator${service.favorite ? " is-favorite" : ""}" type="button" data-toggle-favorite="${esc(service.id)}" aria-label="${service.favorite ? "Remove from favorites" : "Add to favorites"}" aria-pressed="${String(!!service.favorite)}" title="${service.favorite ? "Remove from favorites" : "Add to favorites"}" ${state.favoriteBusy.has(service.id) ? "disabled" : ""}>${service.favorite ? "★" : "☆"}</button></div></div>
       <div class="service-tags">${tags}</div>
       <span class="started-at service-card-time">${service.status === "Running" ? `Active since <strong>${esc(activeTime)}</strong>` : !isManaged(service) ? (openUrl ? "Website shortcut" : "No systemd unit configured") : service.status === "Unavailable" ? `<span title="${esc(service.error)}">Host or unit unavailable</span>` : `Unit <strong>${service.substate === "failed" ? "failed" : "inactive"}</strong>`}</span>
       <div class="service-card-bottom"><div class="card-actions">
@@ -377,7 +433,7 @@
     if (state.portHosts.some(host => host.id === previous)) select.value = previous;
     $("#port-host-status").innerHTML = state.portHosts.map(host => `<span class="port-host-badge port-host-connected">${esc(host.name)} <strong>${host.port_count} active</strong></span>`).join("");
     const ports = sortedPorts();
-    $("#ports-list").innerHTML = `<div class="ports-header"><span>Host</span><span>Service</span><span>Service / source</span><span>Port</span><span>Status</span><span>Last checked</span><span>Actions</span></div>${ports.map(port => `<div class="port-row${state.selection?.kind === (port.manual ? "manual-port" : "configured-port") && state.selection.id === (port.manual ? port.id : port.service_id) ? " is-selected" : ""}" data-port-kind="${port.manual ? "manual-port" : "configured-port"}" data-port-id="${esc(port.manual ? port.id : port.service_id)}" tabindex="0" role="button" aria-label="Check ${esc(port.name)} on port ${port.port}"><span class="port-host-cell" title="${esc(port.address || port.host_name)}">${esc(port.host_name)}</span><span class="port-owner-cell" title="${esc(port.name)}">${esc(port.name)}</span><span class="port-owner-cell" title="${esc(port.source || "")}">${esc(port.source || "—")}</span><span class="port-number">${port.port}</span><span class="status-badge ${port.status === "Open" ? "status-running" : "status-unavailable"}" title="${esc(port.error || "")}">${esc(port.status)}</span><span class="port-checked-at">${port.checked_at ? esc(new Date(port.checked_at).toLocaleString()) : "Not checked"}</span><span class="port-row-actions">${port.manual ? `<button type="button" data-manual-port-action="edit" data-id="${esc(port.id)}" aria-label="Edit ${esc(port.name)}" title="Edit port">✎</button>` : `<button type="button" data-configured-port-action="view" data-id="${esc(port.service_id)}" aria-label="View port details for ${esc(port.name)}" title="View port details">✎</button>`}</span></div>`).join("") || `<p class="empty-state">No port records match this filter.</p>`}`;
+    $("#ports-list").innerHTML = `<div class="ports-header"><span>Host</span><span>Service</span><span>Service / source</span><span>Port</span><span>Status</span><span>Last checked</span><span>Actions</span></div>${ports.length ? ports.map(port => `<div class="port-row${state.selection?.kind === (port.manual ? "manual-port" : "configured-port") && state.selection.id === (port.manual ? port.id : port.service_id) ? " is-selected" : ""}" data-port-kind="${port.manual ? "manual-port" : "configured-port"}" data-port-id="${esc(port.manual ? port.id : port.service_id)}" tabindex="0" role="button" aria-label="Check ${esc(port.name)} on port ${port.port}"><span class="port-host-cell" title="${esc(port.address || port.host_name)}">${esc(port.host_name)}</span><span class="port-owner-cell" title="${esc(port.name)}">${esc(port.name)}</span><span class="port-owner-cell" title="${esc(port.source || "")}">${esc(port.source || "—")}</span><span class="port-number">${port.port}</span><span class="status-badge ${port.status === "Open" ? "status-running" : "status-unavailable"}" title="${esc(port.error || "")}">${esc(port.status)}</span><span class="port-checked-at">${port.checked_at ? esc(new Date(port.checked_at).toLocaleString()) : "Not checked"}</span><span class="port-row-actions">${port.manual ? `<button type="button" data-manual-port-action="edit" data-id="${esc(port.id)}" aria-label="Edit ${esc(port.name)}" title="Edit port">✎</button>` : `<button type="button" data-configured-port-action="view" data-id="${esc(port.service_id)}" aria-label="View port details for ${esc(port.name)}" title="View port details">✎</button>`}</span></div>`).join("") : `<p class="empty-state">No port records match this filter.</p>`}`;
     if (state.portFlash) {
       const elapsed = Date.now() - state.portFlash.startedAt;
       if (elapsed < 2000) {
@@ -395,7 +451,13 @@
   function openServiceDetail(serviceId) {
     const service = state.services.find(item => item.id === serviceId);
     if (!service) return;
+    drawerLife.renew(); logLife.renew();
     state.selected = serviceId;
+    state.drawerIdentity = executionIdentity(service);
+    state.desiredFollow = isManaged(service);
+    state.logCursor = null; state.logIdentity = null;
+    $("#log-live-label").textContent = state.desiredFollow ? "Following live" : "Live paused";
+    $("#log-pause").textContent = state.desiredFollow ? "Pause" : "Resume";
     window.HostTracking?.bind($("#drawer-favorite"), "service", serviceId);
     state.logLines = [];
     $("#drawer-title").textContent = displayName(service);
@@ -426,6 +488,12 @@
   function updateDrawerSummary() {
     const service = state.services.find(item => item.id === state.selected);
     if (!service) return;
+    if (state.drawerIdentity !== executionIdentity(service)) {
+      const follow = state.desiredFollow;
+      openServiceDetail(service.id);
+      state.desiredFollow = follow && isManaged(service);
+      return;
+    }
     $("#drawer-meta").innerHTML = drawerMeta(service);
     updateDrawerCheckedAt(service);
     $("#drawer-title").textContent = displayName(service);
@@ -457,20 +525,25 @@
     button.title = favorite ? "Remove from favorites" : "Add to favorites";
     button.setAttribute("aria-label", button.title);
     button.setAttribute("aria-pressed", String(favorite));
+    button.disabled = state.favoriteBusy.has(service.id);
   }
 
   async function toggleServiceFavorite(serviceId, source = "drawer") {
     const service = state.services.find(item => item.id === serviceId);
     if (!service || state.favoriteBusy.has(serviceId)) return;
+    const epoch = auth.epoch;
     state.favoriteBusy.add(serviceId);
     $$(".service-card").filter(card => card.dataset.serviceId === serviceId).forEach(card => { card.querySelector("[data-toggle-favorite]").disabled = true; });
     if (state.selected === serviceId) $("#drawer-favorite").disabled = true;
     try {
       const result = await api(`/api/services/${encodeURIComponent(serviceId)}/favorite`, { method: "PUT", body: JSON.stringify({ favorite: !service.favorite }) });
-      service.favorite = result.favorite;
+      const current = state.services.find(item => item.id === serviceId);
+      if (!current) return;
+      current.favorite = result.favorite;
+      state.selectedUpdates.set(`service:${serviceId}`, {version: ++state.updateVersion, record: current});
       state.favoriteBusy.delete(serviceId);
       renderServices();
-      if (state.selected === serviceId) updateFavoriteButton(service);
+      if (state.selected === serviceId) updateFavoriteButton(current);
       if (result.favorite) {
         const buttons = source === "drawer"
           ? [$("#drawer-favorite")]
@@ -484,14 +557,17 @@
       showToast(result.favorite ? "Added to Favorites." : "Removed from Favorites.");
     } catch (error) { showToast(error.message, "error"); }
     finally {
+      if (epoch !== auth.epoch) return;
       state.favoriteBusy.delete(serviceId);
       $$(".service-card").filter(card => card.dataset.serviceId === serviceId).forEach(card => { const button = card.querySelector("[data-toggle-favorite]"); if (button) button.disabled = false; });
-      if (state.selected === serviceId) $("#drawer-favorite").disabled = false;
+      if (state.selected) { const selected = state.services.find(item => item.id === state.selected); if (selected) updateFavoriteButton(selected); }
     }
   }
 
   function closeDrawer() {
     if (!$("#detail-drawer")) return;
+    drawerLife.renew(); logLife.renew();
+    state.desiredFollow = false; state.drawerIdentity = null;
     if (state.selection?.kind === "service") { clearSelection(); renderServices(); }
     $("#detail-drawer").classList.remove("open");
     $("#detail-drawer").setAttribute("aria-hidden", "true");
@@ -502,47 +578,75 @@
   }
 
   async function loadStatus(serviceId) {
+    const token = drawerLife.capture(serviceId);
     $("#status-output").textContent = "Loading status…";
-    try { $("#status-output").textContent = (await api(`/api/services/${encodeURIComponent(serviceId)}/status`)).status; }
-    catch (error) { $("#status-output").textContent = error.message; }
+    try {
+      const result = await api(`/api/services/${encodeURIComponent(serviceId)}/status`, {signal: token.signal});
+      if (drawerLife.current(token, state.selected)) $("#status-output").textContent = result.status;
+    } catch (error) { if (drawerLife.current(token, state.selected) && !error.stale) $("#status-output").textContent = error.message; }
   }
 
-  async function loadRecentLogs(serviceId, follow) {
-    if (!isManaged(state.services.find(service => service.id === serviceId) || { managed: false })) return;
-    if (window.HostTracking?.active("service", serviceId)) follow = false;
-    state.eventSource?.close();
-    state.eventSource = null;
-    $("#log-live-label").textContent = follow ? "Following live" : "Live paused";
-    $("#log-pause").textContent = follow ? "Pause" : "Resume";
+  async function loadRecentLogs(serviceId) {
+    if (!isManaged(state.services.find(service => service.id === serviceId) || {managed: false})) return;
+    logLife.renew();
+    state.logIdentity = null; state.logCursor = null;
+    const token = logLife.capture(serviceId);
+    const drawer = drawerLife.capture(serviceId);
+    const current = () => logLife.current(token, state.selected) && drawerLife.current(drawer, state.selected);
+    state.eventSource?.close(); state.eventSource = null;
     $("#log-viewer").innerHTML = `<div class="loading-state">Loading journal…</div>`;
     try {
-      const result = await api(`/api/services/${encodeURIComponent(serviceId)}/logs?lines=150`);
-      if (state.selected !== serviceId) return;
-      state.logLines = result.lines || [];
+      const result = await api(`/api/services/${encodeURIComponent(serviceId)}/logs?lines=150`, {signal: token.signal});
+      if (!current()) return;
+      state.logLines = result.lines || []; state.logCursor = result.cursor; state.logIdentity = result.identity;
       renderLogLines();
-      if (follow && state.services.find(service => service.id === serviceId)?.scope !== "external") startLogStream(serviceId);
-      else if (state.services.find(service => service.id === serviceId)?.scope === "external") $("#log-live-label").textContent = "Logs unavailable for external links";
+      if (result.gap) showToast(result.gap, "error");
+      syncTrackingLog();
+
     } catch (error) {
-      $("#log-viewer").innerHTML = `<div class="log-empty">${esc(error.message)}</div>`;
+      if (current() && !error.stale) $("#log-viewer").innerHTML = `<div class="log-empty">${esc(error.message)}</div>`;
     }
   }
 
   function startLogStream(serviceId) {
-    if (window.HostTracking?.active("service", serviceId)) return;
-    if (!isManaged(state.services.find(service => service.id === serviceId) || { managed: false })) return;
+    if (!auth.authenticated || !state.desiredFollow || window.HostTracking?.active("service", serviceId)) return;
+    if (!isManaged(state.services.find(service => service.id === serviceId) || {managed: false})) return;
     state.eventSource?.close();
-    const source = new EventSource(`/api/services/${encodeURIComponent(serviceId)}/logs/stream?lines=30`, { withCredentials: true });
+    const token = logLife.capture(serviceId), drawer = drawerLife.capture(serviceId), epoch = auth.epoch;
+    const params = new URLSearchParams({lines: "0"});
+    if (state.logCursor) params.set("cursor", state.logCursor);
+    if (state.logIdentity) params.set("identity", state.logIdentity);
+    const source = new EventSource(`/api/services/${encodeURIComponent(serviceId)}/logs/stream?${params}`, {withCredentials: true});
     state.eventSource = source;
-    source.onopen = () => { if (state.selected === serviceId) { $("#log-live-label").textContent = "Following live"; $("#log-pause").textContent = "Pause"; } };
+    const current = () => epoch === auth.epoch && state.eventSource === source && state.desiredFollow && logLife.current(token, state.selected) && drawerLife.current(drawer, state.selected);
+    source.onopen = () => { if (current()) { $("#log-live-label").textContent = "Following live"; $("#log-pause").textContent = "Pause"; } };
     source.onmessage = event => {
+      if (!current()) return;
       try {
         const payload = JSON.parse(event.data);
+        if (event.lastEventId) state.logCursor = event.lastEventId;
         state.logLines.push(payload.line);
         if (state.logLines.length > 800) state.logLines.splice(0, state.logLines.length - 800);
         renderLogLines(true);
-      } catch { /* Ignore malformed journal events. */ }
+      } catch { /* Ignore malformed journal events, not repeated text. */ }
     };
-    source.onerror = () => { if (state.selected === serviceId) $("#log-live-label").textContent = "Reconnecting…"; };
+    source.addEventListener("gap", event => {
+      if (!current()) return;
+      $("#log-live-label").textContent = "Log gap · load Recent";
+      showToast("Journal continuity unavailable. Some entries may be missing; load Recent to resynchronize.", "error");
+    });
+    source.addEventListener("identity_changed", async () => {
+      if (!current()) return;
+      source.close(); state.eventSource = null; logLife.renew(); drawerLife.renew();
+      $("#log-live-label").textContent = "Service changed · refreshing…";
+      await refreshAll();
+      if (state.selected === serviceId && epoch === auth.epoch) { loadStatus(serviceId); loadRecentLogs(serviceId); }
+    });
+    source.onerror = async () => {
+      if (!current()) return;
+      $("#log-live-label").textContent = "Reconnecting…";
+      await auth.checkSession();
+    };
   }
 
   function logSeverity(line) {
@@ -608,6 +712,7 @@
       stop: `Stop ${displayName(service)}? Any users currently connected to this service may be disconnected.`,
       restart: `Restart ${displayName(service)}? This will briefly interrupt the service.`
     };
+    state.confirmCleanup?.();
     $("#confirm-title").textContent = `${labels[action]} service?`;
     $("#confirm-copy").textContent = `${copy[action]} Host: ${service.host_name || "This host"} · Unit: ${service.unit || service.id}.`;
     $("#confirm-icon").textContent = action === "start" ? "▶" : action === "stop" ? "■" : "↻";
@@ -634,6 +739,7 @@
   }
 
   async function runAction(serviceId, action) {
+    const epoch = auth.epoch;
     state.busy.add(serviceId);
     renderServices();
     if (state.selected === serviceId) updateDrawerSummary();
@@ -643,7 +749,7 @@
       await refreshAll();
       if (state.selected === serviceId) loadStatus(serviceId);
     } catch (error) { showToast(error.message, "error"); }
-    finally { state.busy.delete(serviceId); renderServices(); if (state.selected === serviceId) updateDrawerSummary(); }
+    finally { if (epoch === auth.epoch) { state.busy.delete(serviceId); renderServices(); if (state.selected === serviceId) updateDrawerSummary(); } }
   }
 
   function updateEditorLocation() {
@@ -778,18 +884,19 @@
     $("#live-indicator").addEventListener("click", toggleLive);
     $("#login-form").addEventListener("submit", async event => {
       event.preventDefault();
+      if (state.logoutPending) return;
       $("#login-error").textContent = "";
+      const loginEpoch = auth.advance(false);
       try {
         const password = window.HostInputLimits.validatePassword($("#login-password").value, await window.HostInputLimits.passwordPolicy());
+        if (loginEpoch !== auth.epoch) return;
         await api("/api/login", { method: "POST", body: JSON.stringify({ password }) });
         $("#login-password").value = "";
         showApp();
-      } catch (error) { $("#login-error").textContent = error.message; }
+      } catch (error) { if (loginEpoch === auth.epoch && !error.stale) $("#login-error").textContent = error.message; }
     });
-    $("#logout-button").addEventListener("click", async () => {
-      try { await api("/api/logout", { method: "POST", body: "{}" }); } catch { /* Expired session is already signed out. */ }
-      showLogin();
-    });
+    $("#logout-button").addEventListener("click", logout);
+    $("#logout-retry").addEventListener("click", logout);
     $("#refresh-button").addEventListener("click", refreshAll);
     const applySummaryFilter = card => {
       const status = card.dataset.summaryFilter;
@@ -867,28 +974,23 @@
     $("#log-search").addEventListener("input", () => renderLogLines());
     $("#log-severity").addEventListener("change", () => renderLogLines());
     $("#log-pause").addEventListener("click", () => {
-      if (state.eventSource) { state.eventSource.close(); state.eventSource = null; $("#log-live-label").textContent = "Live paused"; $("#log-pause").textContent = "Resume"; }
-      else if (state.selected) startLogStream(state.selected);
+      state.desiredFollow = !state.desiredFollow;
+      if (!state.desiredFollow) { state.eventSource?.close(); state.eventSource = null; }
+      else if (state.selected) loadRecentLogs(state.selected);
+      syncTrackingLog();
     });
     $("#log-refresh").addEventListener("click", () => state.selected && loadRecentLogs(state.selected, true));
     document.addEventListener("keydown", event => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        if (window.HostModals?.top()) return;
         if (state.page !== "services" && state.page !== "overview") { location.hash = "#overview"; navigate(); }
         (state.page === "overview" ? $("#service-search") : $("#service-search-page")).focus();
       }
       if ((event.key === "Enter" || event.key === " ") && event.target.matches("[data-summary-filter]")) { event.preventDefault(); applySummaryFilter(event.target); }
       if ((event.key === "Enter" || event.key === " ") && event.target.matches(".service-card")) { event.preventDefault(); openServiceDetailFresh(event.target.dataset.serviceId); }
       if ((event.key === "Enter" || event.key === " ") && event.target.matches(".port-row[data-port-id]")) { event.preventDefault(); selectCheckTarget(event.target.dataset.portKind, event.target.dataset.portId); }
-      if (event.key === "Escape") {
-        if (!$("#manage-confirm-modal").hidden || $("#manual-port-confirm").open) return;
-        closeDrawer();
-        state.confirmCleanup?.();
-        $("#rename-modal").hidden = true;
-        state.renameTarget = null;
-        state.renameGeneration++;
-        closeServicePortEditor();
-      }
+
     });
   }
 
@@ -901,26 +1003,26 @@
         $("#login-error").textContent = "Dashboard password is not configured. Run scripts/setup.sh first.";
       } else if (session.authenticated) showApp();
       else showLogin();
-    } catch { showLogin(); }
+    } catch (error) { if (!error.stale) showLogin(); }
   }
 
   document.addEventListener("input", event => { if (event.target.matches("textarea[data-auto-height]")) resizeTextareas(); });
   window.addEventListener("resize", () => requestAnimationFrame(resizeTextareas));
   window.addEventListener("pagehide", clearSelection);
   function syncTrackingLog() {
-    const tracking = state.selected && window.HostTracking?.active("service", state.selected);
-    $("#log-pause").disabled = !!tracking;
-    if (tracking) {
-      state.eventSource?.close(); state.eventSource = null;
-      $("#log-live-label").textContent = "Tracking · every 5s";
-    } else if ($("#log-live-label").textContent.startsWith("Tracking")) {
-      $("#log-live-label").textContent = "Live paused";
-      $("#log-pause").textContent = "Resume";
-    }
+    const service = state.services.find(item => item.id === state.selected);
+    const tracking = service && window.HostTracking?.active("service", service.id);
+    $("#log-pause").disabled = !service || !isManaged(service) || !!tracking;
+    if (tracking) { state.eventSource?.close(); state.eventSource = null; }
+    $("#log-live-label").textContent = tracking ? "Tracking · every 5s" : state.desiredFollow ? "Following live" : "Live paused";
+    $("#log-pause").textContent = state.desiredFollow ? "Pause" : "Resume";
+    if (!tracking && state.desiredFollow && !state.eventSource && state.logIdentity && service) startLogStream(service.id);
   }
 
   async function trackingCheck(kind, id, signal) {
+    if (!auth.authenticated) return;
     const options = {signal};
+    const drawer = drawerLife.capture(id), logsToken = logLife.capture(id);
     if (kind === "manual-port") {
       const port = await api(`/api/ports/check?kind=manual&id=${encodeURIComponent(id)}`, options);
       if (!signal.aborted) updateCheckedPort(port);
@@ -937,15 +1039,15 @@
     if (state.selected === id) updateDrawerSummary();
     if (isManaged(result.service)) {
       const logs = await api(`/api/services/${encodeURIComponent(id)}/logs?lines=150`, options);
-      if (!signal.aborted && state.selected === id) {
+      if (!signal.aborted && drawerLife.current(drawer, state.selected) && logLife.current(logsToken, state.selected)) {
         state.eventSource?.close(); state.eventSource = null;
-        state.logLines = logs.lines || []; renderLogLines();
+        state.logLines = logs.lines || []; state.logCursor = logs.cursor; state.logIdentity = logs.identity; renderLogLines();
         $("#log-live-label").textContent = "Tracking · every 5s";
         $("#log-pause").textContent = "Resume";
       }
     }
   }
 
-  window.HostDashboard = { trackingCheck, syncTrackingLog, api, refreshAll, showToast, resizeTextareas, navigate, openServiceDetailFresh, selectCheckTarget, displayName, getOpenUrl, canOpen };
+  window.HostDashboard = { auth, registerCleanup: fn => cleanups.add(fn), trackingCheck, syncTrackingLog, api, refreshAll, showToast, resizeTextareas, navigate, openServiceDetailFresh, selectCheckTarget, displayName, getOpenUrl, canOpen };
   init();
 })();

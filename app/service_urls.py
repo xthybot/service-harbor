@@ -28,6 +28,8 @@ def set_url(service_id: str, url: str) -> str:
     if service_id not in SERVICE_BY_ID:
         raise KeyError("Unknown service")
     url = validate_url(url)
+    if SERVICE_BY_ID[service_id].get('service_type') == 'external' and not url:
+        raise ValueError('External websites require an HTTP or HTTPS Open URL.')
     urls = get_urls()
     if url or service_id.startswith("svc-"):
         urls[service_id] = url

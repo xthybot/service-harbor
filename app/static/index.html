@@ -5,16 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101922">
   <title>Host Service Dashboard</title>
-  <link rel="stylesheet" href="/static/styles.css?v=overview-1">
-  <link rel="stylesheet" href="/static/overview.css?v=overview-list-1">
-  <script src="/static/input-limits.js?v=release-safety-1" defer></script>
-  <script src="/static/app.js?v=release-safety-1" defer></script>
-  <script src="/static/tracking.js?v=tracking-1" defer></script>
-  <script src="/static/overview.js?v=overview-list-1" defer></script>
-  <script src="/static/hosts.js?v=card-status-import-1" defer></script>
-  <script src="/static/add-service.js?v=service-editor-1" defer></script>
-  <script src="/static/config-transfer.js?v=release-safety-1" defer></script>
-  <script src="/static/manual-ports.js?v=tracking-1" defer></script>
+  <link rel="stylesheet" href="/static/styles.css?v=lifecycle-3">
+  <link rel="stylesheet" href="/static/overview.css?v=lifecycle-3">
+  <script src="/static/input-limits.js?v=lifecycle-3" defer></script>
+  <script src="/static/async-state.js?v=lifecycle-3" defer></script>
+  <script src="/static/modal-state.js?v=lifecycle-3" defer></script>
+  <script src="/static/app.js?v=lifecycle-3" defer></script>
+  <script src="/static/tracking.js?v=lifecycle-3" defer></script>
+  <script src="/static/overview.js?v=lifecycle-3" defer></script>
+  <script src="/static/hosts.js?v=lifecycle-3" defer></script>
+  <script src="/static/add-service.js?v=lifecycle-3" defer></script>
+  <script src="/static/config-transfer.js?v=lifecycle-3" defer></script>
+  <script src="/static/manual-ports.js?v=lifecycle-3" defer></script>
 </head>
 <body>
   <section id="login-screen" class="login-screen" hidden>
@@ -29,7 +31,7 @@
       <input id="login-password" type="password" autocomplete="current-password" aria-describedby="password-rule-hint" required autofocus>
         <button class="button button-primary button-full" type="submit">Sign in <span aria-hidden="true">→</span></button>
         <p id="login-error" class="form-error" role="alert"></p>
-      </form>
+      <button id="logout-retry" class="button button-secondary" type="button" hidden>Retry sign out</button></form>
     </div>
     <span class="login-foot">PRIVATE HOST · LAN ACCESS</span>
   </section>

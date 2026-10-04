@@ -1,3 +1,6 @@
-@DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl start host-device-monitor.service
-@DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl stop host-device-monitor.service
-@DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl restart host-device-monitor.service
+# Example only. This file grants no controls until an administrator adds exact units.
+# Replace @DASHBOARD_USER@ with the Dashboard account and example.service with a real unit.
+# @DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl start example.service
+# @DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl stop example.service
+# @DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl restart example.service
+# Validate the completed candidate with visudo -cf BEFORE installing to /etc/sudoers.d/.

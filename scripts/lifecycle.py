@@ -12,6 +12,7 @@ import re
 import shutil
 import shlex
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -69,7 +70,7 @@ def ctl(mode, *args, capture=False, check=True):
 
 
 def safe_path(path):
-    if not path.is_absolute() or any(c in str(path) for c in '\n\r\x00'):
+    if not path.is_absolute() or '..' in path.parts or any(ord(c) < 32 or ord(c) == 127 for c in str(path)):
         fail(f'Expected a safe absolute path: {path}')
     for part in (path, *path.parents):
         if part.is_symlink():
@@ -157,13 +158,132 @@ def installed_units():
     return found
 
 
+DATA_FILES = ('bookmarks.json', 'sessions.json', 'hosts.json', 'registered-services.json',
+              'service-metadata.json', 'service-names.json', 'service-open-urls.json',
+              'service-ports.json', 'service-favorites.json', 'manual-ports.json', 'local-catalog.json')
+OWNER_FILE = '.dashboard-owner.json'
+
+
+def receipt_data():
+    if not RECEIPT.exists(): return {}
+    safe_file(RECEIPT)
+    value = json.loads(RECEIPT.read_text())
+    if not isinstance(value, dict) or value.get('project') != str(APP) or value.get('user') != ACCOUNT:
+        fail('Installation receipt does not belong to this account and project.')
+    if not isinstance(value.get('data'), str) or not value['data']:
+        fail('Installation receipt has no data location; restore it before continuing.')
+    return value
+
+
 def data_path(settings):
-    path = Path(settings.get('DASHBOARD_DATA_DIR', str(APP / 'data')))
+    receipt = receipt_data()
+    recorded = settings.get('DASHBOARD_DATA_DIR')
+    if ENV.exists() and not recorded:
+        fail('dashboard.env has no DASHBOARD_DATA_DIR; explicitly restore its original location before continuing.')
+    if recorded and receipt and recorded != receipt['data']:
+        fail('dashboard.env and install.json disagree about DATA_DIR; reconcile the original location first.')
+    path = Path(recorded or receipt.get('data', str(APP / 'data')))
     safe_path(path)
-    protected = (APP, HOME, CONFIG, APP / '.venv', APP / '.git', APP / 'scripts')
-    if any(path == root or path in root.parents or root in path.parents for root in protected[2:]) or path == APP or path in APP.parents or path == HOME or path in HOME.parents:
-        fail('DASHBOARD_DATA_DIR must be a dedicated data directory, not a project/home/system root, config, venv or source directory.')
+    # Only the dedicated data subtree is valid inside the source checkout.
+    if path == APP or (APP in path.parents and not (path == APP / 'data' or APP / 'data' in path.parents)):
+        fail('DATA_DIR cannot contain project source, Git, configuration or virtual environment files.')
+    protected = (HOME, CONFIG_BASE, CONFIG, APP / '.venv', APP / '.git', Path('/etc'), Path('/usr'),
+                 Path('/bin'), Path('/sbin'), Path('/lib'), Path('/lib64'), Path('/boot'), Path('/dev'),
+                 Path('/proc'), Path('/sys'), Path('/run'), Path('/root'))
+    if path in (Path('/var'), Path('/tmp'), Path('/opt'), Path('/srv'), Path('/mnt'), Path('/media')):
+        fail('DATA_DIR must be a dedicated subdirectory, not a shared system root.')
+    if path in APP.parents or any(path == root or path in root.parents for root in protected):
+        fail('DATA_DIR cannot be a home, configuration or system directory.')
+    if any(root in path.parents for root in protected[1:]):
+        fail('DATA_DIR cannot be inside configuration or protected system directories.')
     return path
+
+
+def safe_file(path):
+    safe_path(path)
+    if path.exists() and (not stat.S_ISREG(path.lstat().st_mode) or path.stat().st_uid != UID):
+        fail(f'Expected an ordinary user-owned file, not a directory/device: {path}')
+
+
+def owner_value(data):
+    return {'version': 1, 'project': str(APP), 'user': ACCOUNT, 'uid': UID, 'data': str(data)}
+
+
+def require_owner(data, *, create=False):
+    safe_path(data)
+    if data.exists() and (not data.is_dir() or data.stat().st_uid != UID):
+        fail('DATA_DIR must be a directory owned by the current user.')
+    marker = data / OWNER_FILE
+    safe_file(marker)
+    if marker.exists():
+        if json.loads(marker.read_text()) != owner_value(data):
+            fail('DATA_DIR ownership marker does not match this installation; migrate explicitly.')
+        return
+    if create and (not data.exists() or not any(data.iterdir())):
+        data.mkdir(parents=True, mode=0o700, exist_ok=True)
+        atomic(marker, json.dumps(owner_value(data)) + '\n')
+        marker.chmod(0o600)
+        return
+    fail('DATA_DIR has no ownership marker. Review it, then run python3 scripts/lifecycle.py adopt-data for this legacy installation.')
+
+
+def preflight_data(data):
+    """Validate types before recovery; never follow a JSON or SSH symlink."""
+    safe_path(data)
+    for name in (*DATA_FILES, storage.JOURNAL, '.json.lock', OWNER_FILE): safe_file(data / name)
+    ssh = data / 'ssh'
+    safe_path(ssh)
+    if ssh.exists() and not ssh.is_dir(): fail('Dashboard ssh path must be a directory.')
+    if data.exists():
+        for path in data.iterdir():
+            if path.name.endswith('.json'): safe_file(path)
+    storage.DATA_DIR = data
+    with storage.LOCK:
+        for name in DATA_FILES:
+            if (data / name).exists(): storage.read(name, None)
+        ports = storage.read('service-ports.json', {})
+        if not isinstance(ports, dict): fail('service-ports.json must contain an object.')
+
+
+def revoke_sessions(data):
+    preflight_data(data)  # Acquiring the common lock finishes recovery FIRST.
+    with storage.transaction(): storage.write('sessions.json', {})
+    print('All sessions revoked after successful storage recovery.')
+
+
+def require_offline():
+    for scope in UNITS:
+        result = ctl(scope, 'show', UNIT, '-p', 'ActiveState', '--value', capture=True, check=False)
+        if result.returncode or result.stdout.strip() not in ('inactive', 'failed'):
+            fail(f'Cannot confirm {scope} Dashboard is stopped. Stop it and verify the user manager before this offline operation.')
+
+
+def adopt_data():
+    installed_units()  # Verify any existing units and receipt first.
+    settings = environment()
+    if not ENV.exists() and not RECEIPT.exists():
+        fail('Legacy adoption requires an existing environment or installation receipt with an explicit DATA_DIR.')
+    data = data_path(settings)
+    if (data / OWNER_FILE).exists():
+        require_owner(data)
+        print('Ownership already recorded.'); return
+    require_offline()
+    preflight_data(data)
+    print(f'Legacy DATA_DIR: {data}\nOnly known Dashboard files will be removable; unknown files and SSH content remain protected.')
+    if input('Confirm this data belongs to this installation by typing ADOPT: ') != 'ADOPT': fail('Cancelled.')
+    atomic(data / OWNER_FILE, json.dumps(owner_value(data)) + '\n')
+    (data / OWNER_FILE).chmod(0o600)
+    print('Ownership recorded. Run setup/reset/uninstall again.')
+
+
+def check_unit_paths(mode):
+    # The shell XDG_CONFIG_HOME is not necessarily the already running manager's value.
+    result = ctl('user', 'show', '-p', 'UnitPath', '--value', capture=True, check=False)
+    try: paths = shlex.split(result.stdout)
+    except ValueError: paths = []
+    if result.returncode or str(UNITS['user'].parent) not in paths:
+        fail('Cannot confirm ~/.config/systemd/user is in the running user manager UnitPath. '
+             'Reconcile the manager XDG_CONFIG_HOME / UnitPath before installation; no unit will be written there.')
 
 
 def prompt(label, default):
@@ -247,7 +367,7 @@ def make_unit(mode, data):
                               f'Environment="XDG_RUNTIME_DIR=/run/user/{UID}"',
                               f'Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{UID}/bus"'])
     tokens = {'MARKER': MARKER, 'USER_MANAGER': manager, 'IDENTITY': identity,
-              'APP': str(APP).replace('%', '%%'), 'ENV': str(ENV).replace('%', '%%'), 'DATA': unit_quote(data),
+              'APP': unit_quote(APP), 'ENV': unit_quote(ENV), 'DATA': unit_quote(data),
               'PYTHON': unit_quote(str(APP / '.venv/bin/python').replace('$', '$$')),
               'TARGET': 'multi-user.target' if mode == 'system' else 'default.target'}
     template = (APP / 'systemd' / UNIT).read_text()
@@ -316,6 +436,7 @@ def verify(mode, host, port):
 
 
 def install(reset=False, backend=None):
+    for path in (APP, CONFIG_BASE, CONFIG, ENV, RECEIPT, APP / '.venv'): safe_path(path)
     installed = installed_units()
     old = environment()
     if backend is None:
@@ -352,7 +473,10 @@ def install(reset=False, backend=None):
         existing_python = APP / '.venv/bin/python'
         if existing_python.exists() and run([existing_python, '-m', 'pip', '--version'], capture=True, check=False).returncode:
             python_packages_help('The existing .venv does not have usable pip.', existing_python)
+    require_owner(data, create=True)
+    preflight_data(data)
     ensure_user_manager()
+    check_unit_paths(mode)
     if mode == 'system':
         import grp
         try: grp.getgrnam('systemd-journal')
@@ -394,6 +518,7 @@ def install(reset=False, backend=None):
     snapshots = {path: path.read_bytes() if path.exists() else None for path in (ENV, RECEIPT)}
     previous = {scope: {'active': ctl(scope, 'is-active', UNIT, capture=True, check=False).returncode == 0,
                         'enabled': ctl(scope, 'is-enabled', UNIT, capture=True, check=False).returncode == 0} for scope in installed}
+    preflight_data(data)  # Recovery and format checks before stopping any unit.
     touched = set()
     try:
         step('Stop existing Dashboard units before rebuilding (other services are untouched)')
@@ -428,24 +553,7 @@ def install(reset=False, backend=None):
         atomic(RECEIPT, json.dumps({'version': 1, 'project': str(APP), 'user': ACCOUNT,
                                    'mode': mode, 'data': str(data), 'backend': backend}, indent=2) + '\n')
     except (Exception, KeyboardInterrupt):
-        step('Installation incomplete; restoring previous unit and settings')
-        for scope in touched:
-            try:
-                ctl(scope, 'disable', '--now', UNIT)
-                if scope not in installed: remove_unit(scope)
-            except Exception:
-                print(f'Could not stop/remove new {scope} unit; inspect it manually.', file=sys.stderr)
-        with storage.LOCK:
-            for path, content in snapshots.items():
-                if content is None: path.unlink(missing_ok=True)
-                else: atomic(path, content.decode())
-        for scope, text in installed.items():
-            put_unit(scope, text)
-        for scope in set(installed) | touched:
-            ctl(scope, 'daemon-reload')
-        for scope, status in previous.items():
-            ctl(scope, 'enable' if status['enabled'] else 'disable', UNIT)
-            if status['active']: ctl(scope, 'start', UNIT)
+        rollback_install(installed, previous, touched, snapshots, data)
         raise
     step('Installation complete')
     host, port = values['DASHBOARD_BIND'], values['DASHBOARD_PORT']
@@ -461,51 +569,133 @@ def install(reset=False, backend=None):
     print('Firewall rules and existing sudoers were not changed. System unit controls require separate explicit authorization.')
 
 
+def rollback_install(installed, previous, touched, snapshots, data):
+    step('Installation incomplete; independent rollback steps (not a power-loss recovery mechanism)')
+    results = []
+    def attempt(label, action):
+        try:
+            action(); results.append((label, True)); print(f'Rollback OK: {label}'); return True
+        except (Exception, KeyboardInterrupt) as error:
+            results.append((label, False)); print(f'Rollback FAILED: {label}: {type(error).__name__}', file=sys.stderr); return False
+    safe_to_start = True
+    for scope in touched:
+        safe_to_start &= attempt(f'stop new {scope} unit', lambda s=scope: ctl(s, 'disable', '--now', UNIT))
+        if scope not in installed:
+            safe_to_start &= attempt(f'remove new {scope} unit', lambda s=scope: remove_unit(s))
+    def restore_file(path, content):
+        if content is None: path.unlink(missing_ok=True)
+        else: atomic(path, content.decode())
+    for path in (ENV, RECEIPT):
+        if path in snapshots:
+            safe_to_start &= attempt(f'restore {path.name}', lambda p=path: restore_file(p, snapshots[p]))
+    def restore_data():
+        preflight_data(data)
+        with storage.transaction():
+            for name in ('service-ports.json',):
+                path = data / name
+                if path in snapshots:
+                    value = snapshots[path]
+                    storage.write(name, json.loads(value) if value is not None else {})
+            # Fail closed: never restore sessions revoked during an attempted reset.
+            storage.write('sessions.json', {})
+        preflight_data(data)
+    safe_to_start &= attempt('recover data and revoke sessions', restore_data)
+    for scope, text in installed.items():
+        safe_to_start &= attempt(f'restore {scope} unit', lambda s=scope, t=text: put_unit(s, t))
+    for scope in set(installed) | touched:
+        safe_to_start &= attempt(f'reload {scope} manager', lambda s=scope: ctl(s, 'daemon-reload'))
+    for scope, status in previous.items():
+        safe_to_start &= attempt(f'restore {scope} enablement', lambda s=scope, t=status: ctl(s, 'enable' if t['enabled'] else 'disable', UNIT))
+    if safe_to_start:
+        for scope, status in previous.items():
+            if status['active']: attempt(f'start previous {scope} service', lambda s=scope: ctl(s, 'start', UNIT))
+    else:
+        print('Previous services NOT restarted: recovery/settings/unit consistency was not established. Review rollback failures before starting.', file=sys.stderr)
+    return results
+
+
+def cleanup_data(data):
+    require_owner(data)
+    preflight_data(data)  # Never delete a recovery journal to bypass recovery.
+    targets = [data / name for name in DATA_FILES]
+    # Only exact Dashboard identity files and per-host pin files, never generic ssh/.
+    ssh = data / 'ssh'
+    saved_hosts = storage.read('hosts.json', [])
+    if not isinstance(saved_hosts, list): fail('hosts.json must contain a list before cleaning SSH pins.')
+    host_ids = {host.get('id') for host in saved_hosts if isinstance(host, dict)}
+    if ssh.exists():
+        targets.extend(path for path in ssh.iterdir() if path.name in ('dashboard_ed25519', 'dashboard_ed25519.pub')
+                       or (re.fullmatch(r'[0-9a-f]{32}\.known_hosts', path.name) and path.stem in host_ids))
+    targets.extend(path for path in data.iterdir() if re.fullmatch(r'\.json-write-[a-z0-9_]{8}', path.name))
+    for path in targets: safe_file(path)
+    for path in targets:
+        if not path.exists():
+            print(f'Already absent: {path.name}'); continue
+        step(f'Delete Dashboard data file {path.name}')
+        try: path.unlink()
+        except OSError:
+            print(f'Not cleared: {path}; ownership and installation records retained for retry.', file=sys.stderr); raise
+    if ssh.exists():
+        if any(ssh.iterdir()): print('Retained unknown SSH files; ssh directory was not removed.')
+        else: ssh.rmdir()
+    for name in ('.json.lock',):
+        path = data / name; safe_file(path); path.unlink(missing_ok=True)
+    remaining = [p.name for p in data.iterdir() if p.name != OWNER_FILE]
+    if remaining: print('Retained unrecognized data entries: ' + ', '.join(sorted(remaining)))
+    # Marker remains until *all* uninstall stages succeed, so retries stay authorized.
+
+
 def uninstall():
     installed = installed_units()
     settings = environment()
-    if not ENV.exists() and RECEIPT.exists():
-        settings['DASHBOARD_DATA_DIR'] = json.loads(RECEIPT.read_text())['data']
+    data = data_path(settings)
+    final_retry = receipt_data().get('uninstall_stage') == 'data-cleared'
+    if not final_retry:
+        require_owner(data)
+        preflight_data(data)
     os.environ['XDG_RUNTIME_DIR'] = f'/run/user/{UID}'
     os.environ['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path=/run/user/{UID}/bus'
     for scope in UNITS:
         loaded = ctl(scope, 'show', UNIT, '-p', 'FragmentPath', '--value', capture=True, check=False).stdout.strip()
-        if loaded and scope not in installed:
-            fail(f'A Dashboard unit is still loaded without an owned unit file: {loaded}. Stop and reconcile it before uninstalling.')
-    data = data_path(settings)
-    # A custom directory may hold unrelated files: remove only known application data there.
-    known = ['bookmarks.json', 'sessions.json', 'hosts.json', 'registered-services.json',
-             'service-metadata.json', 'service-names.json', 'service-open-urls.json',
-             'service-ports.json', 'service-favorites.json', 'manual-ports.json', 'local-catalog.json', '.json-transaction.json', 'ssh']
-    targets = [APP / '.venv', ENV, RECEIPT, CONFIG / 'host-service-dashboard.sudoers']
-    targets += [data] if data == APP / 'data' else [data / name for name in known]
-    for path in targets: safe_path(path)
-    step('Uninstall plan: the following Dashboard files will be deleted')
-    for path in [*(UNITS[scope] for scope in installed), *targets]: print(f'  {path}')
-    print('Source code, other services, existing /etc/sudoers.d rules, account groups and linger are retained.')
-    print('Dashboard SSH keys will be deleted. Remove their public keys from remote authorized_keys separately.')
-    if input('Type REMOVE to confirm permanent deletion: ') != 'REMOVE':
-        fail('Cancelled; nothing removed.')
+        if loaded and (scope not in installed or loaded != str(UNITS[scope])):
+            fail(f'A Dashboard unit is loaded from an unowned location: {loaded}. Reconcile it first.')
+    for path in (APP / '.venv', ENV, RECEIPT, CONFIG / 'host-service-dashboard.sudoers'): safe_path(path)
+    for path in (ENV, RECEIPT, CONFIG / 'host-service-dashboard.sudoers'): safe_file(path)
+    step(f'Uninstall: owned Dashboard records in {data}, private settings, owned units and .venv')
+    print('Unknown files, source code, other services, sudoers and linger are retained.')
+    print('Remove the Dashboard public key from remote authorized_keys separately.')
+    if input('Type REMOVE to confirm permanent deletion: ') != 'REMOVE': fail('Cancelled; nothing removed.')
+    # Durable original target before any deletion, including legacy deployments.
+    receipt = receipt_data() or {'version': 1, 'project': str(APP), 'user': ACCOUNT, 'data': str(data)}
+    receipt['uninstall_pending'] = True
+    atomic(RECEIPT, json.dumps(receipt) + '\n')
     for scope in installed:
         step(f'Stop, disable and remove {scope} Dashboard service')
-        if scope == 'user':
-            os.environ['XDG_RUNTIME_DIR'] = f'/run/user/{UID}'
-            os.environ['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path=/run/user/{UID}/bus'
         ctl(scope, 'disable', '--now', UNIT)
         remove_unit(scope); ctl(scope, 'daemon-reload')
-        ctl(scope, 'reset-failed', UNIT, capture=True, check=False) if scope == 'user' else None
-    for path in targets:
-        if not path.exists(): continue
-        step(f'Delete {path}')
-        if path.is_dir(): shutil.rmtree(path)
-        else: path.unlink()
+    if not final_retry: cleanup_data(data)
+    venv = APP / '.venv'
+    if venv.exists():
+        step('Delete virtual environment')
+        if not venv.is_dir(): fail('.venv is not a directory; retained for manual inspection.')
+        shutil.rmtree(venv)  # Python rmtree does not follow internal directory symlinks.
+    for path in (CONFIG / 'host-service-dashboard.sudoers', ENV):
+        step(f'Delete {path.name}')
+        path.unlink(missing_ok=True)
+    # Persist final-stage progress before removing the last ownership marker.
+    receipt['uninstall_stage'] = 'data-cleared'
+    atomic(RECEIPT, json.dumps(receipt) + '\n')
+    safe_file(data / OWNER_FILE)
+    (data / OWNER_FILE).unlink(missing_ok=True)
+    if data.exists() and not any(data.iterdir()): data.rmdir()
+    RECEIPT.unlink(missing_ok=True)
     if CONFIG.exists() and not any(CONFIG.iterdir()): CONFIG.rmdir()
-    step('Uninstall complete; source code retained. Run bash scripts/setup.sh to install again.')
+    step('Uninstall complete; unknown files (if listed) retained. Source code remains.')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['setup', 'reset', 'uninstall'])
+    parser.add_argument('action', choices=['setup', 'reset', 'uninstall', 'adopt-data', 'revoke-sessions'])
     parser.add_argument('--backend', choices=['venv', 'uv'], help='Environment tool; defaults to the recorded backend, or venv')
     args = parser.parse_args()
     action = args.action
@@ -521,6 +711,11 @@ def main():
         try: fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: fail('Another lifecycle operation is running for this project.')
         if action == 'uninstall': uninstall()
+        elif action == 'adopt-data': adopt_data()
+        elif action == 'revoke-sessions':
+            installed_units()
+            require_offline()
+            revoke_sessions(data_path(environment()))
         else: install(reset=action == 'reset', backend=args.backend)
     finally:
         os.close(descriptor)

@@ -11,3 +11,16 @@
 - [x] T7 全項回歸、語法檢查、文件同步、正式服務重啟與唯讀驗收，合併 main；公開 repository 使用 service-harbor、原 private repo 改名加上 -private；發布採無歷史乾淨快照，完成後核對遠端 SHA。
 
 驗收：`.venv/bin/python -m unittest discover -s tests -v`；前端限制以 `node --test tests/frontend-limits.test.cjs`；`node --check`、`bash -n`、`git diff --check`。測試必須將 DATA_DIR 設為 TemporaryDirectory，禁止使用真實密碼、cookie、主機資料或 SSH 連線。結果另列於 docs/RELEASE_ACCEPTANCE.zh-TW.md。
+
+## 安全與一致性修正（2026-10-04）
+
+本節以 `fix/lifecycle-consistency` 分支為工作基線；逐項證據與限制見 [安全修正驗收紀錄](docs/SAFETY_REMEDIATION_ACCEPTANCE.zh-TW.md)。本次只修改原始碼、隔離測試及文件；不部署正式服務、不推送 GitHub、不更改 LICENSE。
+
+- [x] S1 登出失敗、401、跨登入世代、SSE session 重查及完整 UI 清理。
+- [x] S2 匯入預覽憑據、交易內版本驗證、保留跳過衝突；外部 probe 移出全域鎖。
+- [x] S3 新增／編輯／settings／匯入共用服務欄位不變條件與 HTTP URL authority 驗證。
+- [x] S4 安裝／移除 ownership、重試、離線 session 撤銷、回復及 user manager 路徑防護。
+- [x] S5 Status／Recent／SSE 以 generation、服務身分與 journal cursor 管理競態與續傳。
+- [x] S6 Favorite、busy、inventory、Hosts 刷新佇列、Open ports 空結果、頂層 modal focus/Escape。
+- [x] S7 sudoers 範本預設不授權、候選先 visudo 驗證、原機／跨主機操作與測試範圍文件同步。
+- [x] S8 最終審核：全量隔離測試、語法／diff、敏感資料檢查、提交並安全合併本機 main。提交與合併資訊見驗收紀錄。

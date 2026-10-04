@@ -198,3 +198,5 @@
 .service-port-readonly-content{padding:0 24px 23px}
 @media(max-width:560px){#service-port-modal .service-edit-heading{flex-wrap:wrap}.service-port-readonly-content{padding:0 18px 20px}.service-port-heading-actions .button{padding:0 8px;font-size:11px}}
 @media(max-width:560px){.port-edit-actions{flex-wrap:wrap}.port-edit-actions .port-delete-button{flex:1 0 100%;margin-right:0}.service-edit-modal .port-edit-actions .port-delete-button{flex:0 0 auto;margin-right:auto}}
+
+.config-import-dialog #config-import-conflicts{max-height:22vh;overflow:auto;white-space:pre-wrap;line-height:1.5}
