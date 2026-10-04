@@ -1,0 +1,21 @@
+@MARKER@
+[Unit]
+Description=Host Service Dashboard
+After=network.target
+@USER_MANAGER@
+[Service]
+Type=simple
+@IDENTITY@
+WorkingDirectory=@APP@
+EnvironmentFile=@ENV@
+ExecStart=@PYTHON@ -m uvicorn app.main:app --host ${DASHBOARD_BIND} --port ${DASHBOARD_PORT}
+Restart=on-failure
+RestartSec=3
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DATA@
+
+[Install]
+WantedBy=@TARGET@

@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101922">
+  <title>Host Service Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css?v=overview-1">
+  <link rel="stylesheet" href="/static/overview.css?v=overview-list-1">
+  <script src="/static/input-limits.js?v=release-safety-1" defer></script>
+  <script src="/static/app.js?v=release-safety-1" defer></script>
+  <script src="/static/tracking.js?v=tracking-1" defer></script>
+  <script src="/static/overview.js?v=overview-list-1" defer></script>
+  <script src="/static/hosts.js?v=card-status-import-1" defer></script>
+  <script src="/static/add-service.js?v=service-editor-1" defer></script>
+  <script src="/static/config-transfer.js?v=release-safety-1" defer></script>
+  <script src="/static/manual-ports.js?v=tracking-1" defer></script>
+</head>
+<body>
+  <section id="login-screen" class="login-screen" hidden>
+    <div class="login-card">
+      <div class="brand-mark">H</div>
+      <p class="eyebrow">HOST CONSOLE</p>
+      <h1>Welcome back</h1>
+      <p class="muted">Sign in to manage services on this host.</p>
+      <form id="login-form">
+        <label for="login-password">Dashboard password</label>
+        <p id="password-rule-hint">1–256 Unicode characters; no control characters.</p>
+      <input id="login-password" type="password" autocomplete="current-password" aria-describedby="password-rule-hint" required autofocus>
+        <button class="button button-primary button-full" type="submit">Sign in <span aria-hidden="true">→</span></button>
+        <p id="login-error" class="form-error" role="alert"></p>
+      </form>
+    </div>
+    <span class="login-foot">PRIVATE HOST · LAN ACCESS</span>
+  </section>
+
+  <div id="app-shell" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#overview" aria-label="Host Console home">
+        <span class="brand-mark">H</span>
+        <span class="brand-copy"><strong>HOST</strong><small>CONTROL CENTER</small></span>
+      </a>
+      <div class="nav-caption">WORKSPACE</div>
+      <nav class="primary-nav" aria-label="Main navigation">
+        <a href="#overview" data-nav="overview" class="nav-link active"><span class="nav-icon">◫</span>Overview</a>
+        <a href="#services" data-nav="services" class="nav-link"><span class="nav-icon">▤</span>Services <span id="nav-service-count" class="nav-count">—</span></a>
+        <a href="#ports" data-nav="ports" class="nav-link"><span class="nav-icon">⌁</span>Open ports</a>
+        <a href="#hosts" data-nav="hosts" class="nav-link" title="Hosts"><span class="nav-icon">▣</span>Hosts</a>
+        <a href="#add-service" data-nav="add-service" class="nav-link" title="Add service"><span class="nav-icon">＋</span>Add service</a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="host-card">
+        <span class="host-pulse"></span>
+        <div><small>HOST STATUS</small><strong>Online</strong></div>
+        <span class="host-menu">···</span>
+      </div>
+      <div class="sidebar-bottom"><span class="version-dot"></span>Local management <span class="version">v1.0</span></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong id="page-crumb">Overview</strong></div>
+        <div class="topbar-tools">
+          <button id="live-indicator" class="live-indicator" type="button" aria-pressed="false" title="Toggle checks for the selected service or port"><span class="live-dot"></span><span id="live-indicator-label">Not live</span></button>
+          <span class="top-divider"></span>
+          <span class="host-chip"><span class="host-chip-icon">⌂</span><span id="host-name">This host</span></span>
+          <button id="logout-button" class="icon-button logout-button" type="button" title="Sign out" aria-label="Sign out">⇥</button>
+        </div>
+      </header>
+
+      <section id="overview-view" class="page-view">
+        <div class="page-heading"><div><p class="eyebrow">WORKSPACE</p><h1>Overview</h1><p class="page-subtitle">What needs attention. What you use every day.</p></div><div class="heading-actions"><span class="updated-label">Updated <strong id="updated-at">Not checked</strong></span><button id="refresh-button" class="button button-secondary" type="button">↻ Refresh</button></div></div>
+        <div class="ov-search"><label for="service-search">⌕ <span class="sr-only">Search services, hosts or ports</span></label><input id="service-search" type="search" placeholder="Find a service, host, IP or port…" autocomplete="off" aria-controls="ov-search-results"><kbd>Ctrl / ⌘ K</kbd></div>
+        <div id="ov-search-results" class="ov-search-results" hidden></div>
+        <p id="ov-refresh-error" class="ov-error" role="status" hidden></p>
+        <div class="ov-priority-grid">
+        <section class="ov-attention" aria-labelledby="ov-attention-title"><div class="ov-section-heading"><div><p class="eyebrow">PRIORITY</p><h2 id="ov-attention-title">Needs attention <span id="ov-attention-count" class="ov-count">—</span></h2></div><button id="ov-attention-expand" class="ov-text-button" type="button" hidden>View all →</button></div><div id="ov-attention-filters" class="ov-tabs" role="group" aria-label="Filter attention items"></div><div id="ov-attention-list"><p class="ov-empty">Loading recorded status…</p></div></section>
+        <section class="ov-quick-actions" aria-labelledby="tracking-title"><div class="ov-section-heading"><div><p class="eyebrow">EVERY 5 SECONDS</p><h2 id="tracking-title">Tracking</h2></div></div><div id="tracking-list"><p class="ov-empty">Use the blue bell in service or port details to start a timed check.</p></div></section>
+        </div>
+        <div class="ov-workspace-grid">
+        <div class="ov-bottom-grid"><section class="ov-panel" aria-labelledby="ov-hosts-title"><div class="ov-section-heading"><h2 id="ov-hosts-title">Hosts</h2><a href="#hosts" class="ov-text-button">Manage hosts →</a></div><div id="ov-hosts"><p class="ov-empty">Loading hosts…</p></div></section><section class="ov-panel" aria-labelledby="ov-ports-title"><div class="ov-section-heading"><h2 id="ov-ports-title">TCP ports</h2><a href="#ports" class="ov-text-button">Open ports →</a></div><p class="ov-panel-note">Connection results from this dashboard host.</p><div id="ov-ports"><p class="ov-empty">Loading recorded ports…</p></div></section></div>
+        <section class="ov-section" aria-labelledby="ov-favorites-title"><div class="ov-section-heading"><div><p class="eyebrow">QUICK ACCESS</p><h2 id="ov-favorites-title">Favorites <span id="ov-favorites-count" class="ov-count">—</span></h2></div><button id="ov-favorites-expand" type="button" class="ov-text-button" hidden>View all →</button></div><div id="ov-favorites" class="ov-favorites"><p class="ov-empty">Loading favorites…</p></div></section>
+        </div>
+      </section>
+
+      <section id="services-view" class="page-view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">SERVICE CATALOG</p><h1>Services</h1><p class="page-subtitle">Check health and manage allowlisted systemd units.</p></div><div class="heading-actions"><span class="updated-label">Updated <strong id="services-updated-at">just now</strong></span><button id="export-services" class="button button-secondary" type="button">↓ Export JSON</button></div></div>
+        <div class="summary-grid" aria-label="Service status summary">
+          <article class="summary-card summary-total" data-summary-filter="all" tabindex="0" role="button" aria-label="Show all services"><div class="summary-top"><span>Total services</span><span class="summary-icon icon-neutral">▤</span></div><div class="summary-value" id="count-total">—</div><div class="summary-foot"><span class="foot-mark">↗</span> In your service catalog</div></article>
+          <article class="summary-card" data-summary-filter="Running" tabindex="0" role="button" aria-label="Show running services"><div class="summary-top"><span>Running</span><span class="summary-icon icon-green">✓</span></div><div class="summary-value" id="count-running">—</div><div class="summary-foot"><span class="status-dot dot-green"></span> Operating normally</div></article>
+          <article class="summary-card" data-summary-filter="Stopped" tabindex="0" role="button" aria-label="Show stopped services"><div class="summary-top"><span>Stopped</span><span class="summary-icon icon-gray">Ⅱ</span></div><div class="summary-value" id="count-stopped">—</div><div class="summary-foot">Services not currently active</div></article>
+          <article class="summary-card" data-summary-filter="Failed" tabindex="0" role="button" aria-label="Show failed services"><div class="summary-top"><span>Failed</span><span class="summary-icon icon-red">!</span></div><div class="summary-value" id="count-failed">—</div><div class="summary-foot" id="failed-foot">Needs attention</div></article>
+        </div>
+
+        <div class="filter-bar"><label class="search-field"><span class="search-icon">⌕</span><input id="service-search-page" type="search" placeholder="Search services or ports…" autocomplete="off"></label><label class="select-wrap"><select id="status-filter-page" aria-label="Filter by status"><option value="all">All statuses</option><option value="Running">Running</option><option value="Stopped">Stopped</option><option value="Failed">Failed</option><option value="Unavailable">Unavailable</option><option value="Linked">Linked</option><option value="Unmanaged">Unmanaged</option></select></label><label class="select-wrap"><select id="category-filter-page" aria-label="Filter by category"><option value="all">All categories</option></select></label></div>
+        <div class="scope-toggle service-scope-toggle ov-services-scope" role="group" aria-label="Filter services"><button data-scope="all" class="scope-chip selected" type="button">All</button><button data-scope="user" class="scope-chip" type="button">User</button><button data-scope="system" class="scope-chip" type="button">System</button><button data-scope="favorites" class="scope-chip" type="button">☆ Favorites</button></div>
+        <div class="host-filter-row"><label class="select-wrap"><select id="service-host-filter" aria-label="Filter service host"><option value="all">All hosts</option></select></label><a href="#add-service" class="text-link">Add service +</a></div>
+        <div id="service-grid-page" class="service-grid"></div><p id="empty-services-page" class="empty-state" hidden>No services match these filters.</p>
+      </section>
+
+      <section id="ports-view" class="page-view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">NETWORK INVENTORY</p><h1>Open ports</h1><p class="page-subtitle">Every recorded TCP port is checked from this dashboard host. Select a row to check it again.</p></div><div class="heading-actions"><span class="port-refresh-note"><span class="live-dot"></span><span id="manual-ports-updated">Not checked yet</span></span><button id="manual-port-add" type="button" class="button button-primary">＋ Add port</button></div></div>
+        <div class="port-toolbar"><label class="search-field"><span class="search-icon">⌕</span><input id="port-search" type="search" placeholder="Search by host, port, or service…" autocomplete="off"></label></div>
+        <div class="port-host-toolbar"><label class="select-wrap"><select id="port-host-filter" aria-label="Filter ports by host"><option value="all">All hosts</option></select></label><div id="port-host-status" class="port-host-status" aria-label="Configured running service ports by host"></div></div>
+        <div id="ports-list" class="ports-list"></div>
+      </section>
+
+      <section id="hosts-view" class="page-view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">REMOTE CONNECTIONS</p><h1>Hosts</h1><p class="page-subtitle">Register a host first, then select it when adding a service.</p></div><div class="heading-actions"><button id="host-add-toggle" type="button" class="button button-primary">＋ Add host</button><button id="host-help-toggle" type="button" class="button button-secondary">ⓘ SSH guide</button></div></div>
+        <div class="hosts-summary"><div><span>THIS HOST</span><strong>Local</strong><small>Existing services stay on this machine</small></div><div><span>REMOTE HOSTS</span><strong id="hosts-total">0</strong><small>Registered SSH connections</small></div><div><span>LAST CHECK CONNECTED</span><strong id="hosts-connected">0</strong><small>Use Check connection to update</small></div></div>
+        <div class="hosts-workspace">
+          <section class="hosts-inventory" aria-labelledby="remote-hosts-title">
+            <div class="section-heading"><h2 id="remote-hosts-title">Remote hosts <span id="hosts-list-count" class="heading-count">0</span></h2><button id="hosts-refresh" type="button" class="button button-secondary">↻ Refresh list</button></div>
+            <div id="hosts-grid" class="hosts-grid"></div><p id="hosts-empty" class="empty-state">No remote hosts yet. Add a host, install the public key, verify its fingerprint, then check the connection.</p>
+          </section>
+          <aside class="ssh-key-panel" aria-labelledby="ssh-public-key-title">
+            <div class="ssh-key-heading"><div><p class="eyebrow">SSH IDENTITY</p><h2 id="ssh-public-key-title">Public key</h2><p>Add this key to the remote account’s <code>~/.ssh/authorized_keys</code>.</p></div></div>
+            <textarea id="ssh-public-key" data-auto-height readonly rows="1" aria-label="Dashboard public SSH key" placeholder="Generate the dashboard key to get started."></textarea>
+            <div class="ssh-key-footer"><code id="ssh-key-fingerprint">No key generated</code><div><button id="ssh-key-generate" class="button button-primary" type="button">Generate key</button><button id="ssh-key-copy" class="button button-secondary" type="button" disabled>Copy key</button><button id="ssh-key-download" class="button button-secondary" type="button" disabled>Download .pub</button></div></div>
+            <p class="ssh-key-private-note">◇ Private key stays on this dashboard host.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="add-service-view" class="page-view" hidden>
+        <div class="page-heading"><div><p class="eyebrow">EXPAND YOUR WORKSPACE</p><h1>Add service</h1><p class="page-subtitle">Bring another service into your workspace. Start with its details.</p></div><div class="heading-actions"><span class="add-preview-badge">Live registration</span><button id="import-services" class="button button-secondary" type="button">↑ Import JSON</button><input id="import-services-file" type="file" accept=".json,application/json" hidden></div></div>
+        <div class="add-layout">
+          <form id="add-service-form" class="add-form-card">
+            <div class="add-section-heading"><div><h2>Service settings</h2></div></div>
+            <div class="service-form-rows">
+              <div class="service-form-row"><label for="add-host">Host <b>*</b></label><div class="service-field-control"><select id="add-host" name="host_id" required><option value="local">This host</option><option value="external">External website · link only</option></select><a href="#hosts" class="text-link">Add or manage remote hosts →</a></div></div>
+              <div class="service-form-row"><label for="add-display-name">Display name <b>*</b></label><div class="service-field-control"><input id="add-display-name" name="display_name" maxlength="80" placeholder="e.g. My project website" required></div></div>
+              <div class="service-form-row"><label for="add-category">Category</label><div class="service-field-control"><select id="add-category" name="category"><option>Websites</option><option>Tools</option><option>Automation</option><option>Gateways</option><option>Monitoring</option><option>Network</option><option>Remote Access</option><option>Management</option><option>Other</option></select></div></div>
+              <div id="add-scope-field" class="service-form-row"><label for="add-scope">Service scope</label><div class="service-field-control"><select id="add-scope" name="scope"><option value="user">User · current account</option><option value="system">System · host-wide</option></select></div></div>
+              <div class="service-form-row"><label for="add-description">Description</label><div class="service-field-control"><textarea id="add-description" name="description" data-auto-height maxlength="240" rows="1" placeholder="What does this service do?"></textarea></div></div>
+              <div id="add-port-field" class="service-form-row"><label for="add-port">Service port <em>Optional</em></label><div class="service-field-control"><input id="add-port" name="port" type="number" min="1" max="65535" inputmode="numeric" placeholder="e.g. 8765"></div></div>
+              <div id="add-unit-field" class="service-form-row"><label for="add-unit">systemd unit <em>Optional</em></label><div class="service-field-control"><input id="add-unit" name="unit" maxlength="200" placeholder="my-project.service" title="Enter a systemd unit ending in .service or .socket"></div></div>
+              <div class="service-form-row"><label for="add-open-url">Open URL <em id="add-url-requirement">Optional</em></label><div class="service-field-control"><input id="add-open-url" name="open_url" type="url" maxlength="2048" placeholder="https://project.example.com"></div></div>
+              <div class="service-form-row"><label for="add-favorite">Favorites</label><div class="service-field-control"><label class="add-favorite"><input id="add-favorite" name="favorite" type="checkbox"><span>☆ Add to favorites</span></label></div></div>
+            </div>
+            <p id="add-form-feedback" class="add-feedback" role="status" aria-live="polite"></p>
+            <div class="add-form-actions"><button id="add-register" class="button button-primary" type="submit">Add service <span>→</span></button></div>
+          </form>
+          <aside class="add-preview-column">
+            <div class="add-preview-heading"><span class="eyebrow">LIVE PREVIEW</span><span>Updates as you type</span></div>
+            <article class="add-service-preview">
+              <div class="add-preview-top"><span id="add-preview-mark" class="service-mark mark-web">M</span><span class="add-draft-badge">Draft</span><span id="add-preview-star" class="favorite-indicator" aria-label="Favorite status">☆</span></div>
+              <h2 id="add-preview-name">Your new service</h2><p id="add-preview-description">Fill in the service details to preview its card.</p>
+              <div class="service-tags"><span id="add-preview-port" class="port-tag" hidden></span><span id="add-preview-category" class="port-tag">Websites</span><span id="add-preview-scope" class="port-tag">USER UNIT</span><span id="add-preview-host" class="port-tag">This host</span></div>
+              <code id="add-preview-unit">my-project.service</code>
+              <div class="add-preview-url"><span>OPEN TARGET</span><strong id="add-preview-url">Configured host + port</strong></div>
+              <div class="add-preview-controls" aria-label="Control preview"><span>↗ Open</span><span data-add-local-control>▶ Start</span><span data-add-local-control>↻ Restart</span></div>
+            </article>
+            <div class="add-next-step"><h3>Once added to Services</h3><div class="add-notice"><span aria-hidden="true">ⓘ</span><p>Select This host or a host added in Hosts to register an existing systemd unit. External website saves a link only. Registration does not create or start a unit.</p></div><ol><li>Find it in your Services list</li><li id="add-next-log">View status and live journal logs</li><li id="add-next-control">Use Start / Stop / Restart controls</li></ol><p id="add-scope-note">Local user services run under the dashboard account.</p></div>
+            <a href="#services" class="add-back-link">← Edit existing services in Services</a>
+          </aside>
+        </div>
+      </section>
+
+      <footer class="page-footer"><span>HOST CONTROL CENTER</span><span id="dashboard-endpoint-label">Local service management</span></footer>
+    </main>
+  </div>
+
+  <dialog id="manual-port-modal" class="host-dialog host-form-dialog" aria-labelledby="manual-port-title">
+    <form id="manual-port-form" class="host-form-card">
+      <div class="ssh-key-heading"><div><p class="eyebrow">NETWORK INVENTORY</p><h2 id="manual-port-title">Add port</h2></div><button id="manual-port-close" type="button" class="icon-button" aria-label="Close port form">×</button></div>
+      <div class="service-form-rows">
+        <div class="service-form-row"><label for="manual-port-host">Host</label><div class="service-field-control"><select id="manual-port-host" required><option value="local">This host</option><option value="custom">Other IP / hostname</option></select></div></div>
+        <div id="manual-port-address-row" class="service-form-row" hidden><label for="manual-port-address">IP / hostname</label><div class="service-field-control"><input id="manual-port-address" maxlength="253" placeholder="192.168.1.20" autocomplete="off"></div></div>
+        <div class="service-form-row"><label for="manual-port-name">Service name</label><div class="service-field-control"><input id="manual-port-name" maxlength="80" placeholder="e.g. Project website" required></div></div>
+        <div class="service-form-row"><label for="manual-port-source">Service / source</label><div class="service-field-control"><textarea id="manual-port-source" data-auto-height maxlength="240" rows="1" placeholder="Optional unit, file path, or URL"></textarea></div></div>
+        <div class="service-form-row"><label for="manual-port-number">Port</label><div class="service-field-control"><input id="manual-port-number" type="number" min="1" max="65535" inputmode="numeric" placeholder="e.g. 8080" required></div></div>
+      </div>
+      <div class="manual-port-check-row"><button id="manual-port-check" type="button" class="button button-secondary">✓ Check port</button><span id="manual-port-check-result" class="manual-port-check-result" role="status" aria-live="polite">○ Not checked</span></div>
+      <div class="add-form-actions port-edit-actions"><button id="manual-port-delete" type="button" class="button button-danger port-delete-button" hidden>Remove port</button><button id="manual-port-cancel" type="button" class="button button-secondary">Cancel</button><button id="manual-port-save" type="submit" class="button button-primary" disabled>Save port →</button></div>
+    </form>
+  </dialog>
+  <dialog id="manual-port-confirm" class="host-dialog manual-port-confirm-dialog" aria-labelledby="manual-port-confirm-title"><div class="host-form-card"><h2 id="manual-port-confirm-title">Port already recorded</h2><p id="manual-port-confirm-copy"></p><div class="add-form-actions"><button id="manual-port-confirm-cancel" type="button" class="button button-secondary">Cancel</button><button id="manual-port-confirm-accept" type="button" class="button button-primary">Save anyway</button></div></div></dialog>
+
+  <dialog id="host-form-modal" class="host-dialog host-form-dialog" aria-labelledby="host-form-title">
+    <form id="host-form" class="host-form-card"><div class="ssh-key-heading"><h2 id="host-form-title">Add SSH host</h2><button id="host-form-close" type="button" class="icon-button" aria-label="Close host form">×</button></div><div class="host-form-fields service-form-rows"><div class="service-form-row"><label for="host-display-name">Display name</label><div class="service-field-control"><input id="host-display-name" name="name" maxlength="80" placeholder="e.g. Production server" required></div></div><div class="service-form-row"><label for="host-address">IP address / hostname</label><div class="service-field-control"><input id="host-address" name="address" maxlength="253" placeholder="192.168.1.20" required></div></div><div class="service-form-row"><label for="host-username">SSH username</label><div class="service-field-control"><input id="host-username" name="username" maxlength="33" placeholder="dashboard" required></div></div><div class="service-form-row"><label for="host-port">SSH port</label><div class="service-field-control"><input id="host-port" name="port" type="number" min="1" max="65535" value="22" required></div></div></div><p class="host-form-hint">This host uses the dashboard’s dedicated key. Changing its address or port requires a new fingerprint confirmation.</p><div class="add-form-actions"><button id="host-form-cancel" type="button" class="button button-secondary">Cancel</button><button type="submit" class="button button-primary">Save host →</button></div></form>
+  </dialog>
+  <dialog id="config-export-modal" class="host-dialog config-export-dialog" aria-labelledby="config-export-title">
+    <header class="host-dialog-header"><div><p class="eyebrow">SERVICE CONFIGURATION</p><h2 id="config-export-title">Export JSON</h2><p>Choose which service settings to download.</p></div><button id="config-export-close" type="button" class="icon-button" aria-label="Close export dialog">×</button></header>
+    <div class="host-guide-content"><section class="service-form-rows"><div class="service-form-row"><label for="config-export-selection">Export</label><div class="service-field-control"><select id="config-export-selection"><option value="all">All services</option><option value="favorites">Favorites</option><option value="registered">Manually added</option><option value="category">One category</option><option value="service">One service</option></select></div></div><div id="config-export-target-row" class="service-form-row" hidden><label for="config-export-target">Choose</label><div class="service-field-control"><select id="config-export-target"></select></div></div><p>The file includes service settings and remote host address, SSH username and port. It excludes host display names, SSH keys, fingerprints and passwords.</p></section></div>
+    <footer class="host-dialog-footer"><button id="config-export-cancel" type="button" class="button button-secondary">Cancel</button><button id="config-export-download" type="button" class="button button-primary">Download JSON</button></footer>
+  </dialog>
+  <dialog id="config-import-modal" class="host-dialog config-import-dialog" aria-labelledby="config-import-title">
+    <header class="host-dialog-header"><div><p class="eyebrow">SERVICE CONFIGURATION</p><h2 id="config-import-title">Import JSON</h2><p id="config-import-summary"></p></div><button id="config-import-close" type="button" class="icon-button" aria-label="Close import confirmation">×</button></header>
+    <div class="host-guide-content"><section><h3>Before you import</h3><p id="config-import-preview"></p><p id="config-import-conflicts" hidden></p><p>Hosts match by IP address or saved hostname, SSH username and SSH port. A different port creates another host named <code>username (port)</code>; other new hosts use the username as their display name.</p><p>New SSH hosts stay untrusted until you verify their fingerprint in Hosts. Importing never starts or stops a service.</p><p id="config-import-warning" hidden></p></section></div>
+    <footer class="host-dialog-footer"><button id="config-import-cancel" type="button" class="button button-secondary">Cancel</button><button id="config-import-skip" type="button" class="button button-secondary" hidden>Import new only</button><button id="config-import-confirm" type="button" class="button button-primary">Import services</button></footer>
+  </dialog>
+  <dialog id="host-help-modal" class="host-dialog host-help-dialog" aria-labelledby="host-help-title">
+    <header class="host-dialog-header"><div><p class="eyebrow">REMOTE ACCESS GUIDE</p><h2 id="host-help-title">SSH permissions &amp; operations</h2><p>Commands the dashboard runs on a registered host, and the access each one needs.</p></div><button id="host-help-close" type="button" class="icon-button" aria-label="Close SSH guide" autofocus>×</button></header>
+    <div class="host-guide-content">
+      <section>
+        <h3>Commands run on the remote host</h3>
+        <p><code>UNIT</code> is a registered systemd service or socket; <code>N</code> is the requested log line count. User scope adds <code>--user</code>. Registration reads an existing unit; it never creates or starts one.</p>
+        <div class="host-command-group"><strong>Check connection</strong><pre>/usr/bin/id
+/usr/bin/systemctl --version
+/usr/bin/journalctl --system --no-pager -n 1 -o short-iso</pre></div>
+        <div class="host-command-group"><strong>Read service state and start time</strong><pre>/usr/bin/systemctl show --no-pager --property=Id,Description,ActiveState,SubState,ActiveEnterTimestamp,FragmentPath,LoadState UNIT
+/usr/bin/systemctl --user show --no-pager --property=Id,Description,ActiveState,SubState,ActiveEnterTimestamp,FragmentPath,LoadState UNIT</pre><p>The first line is for System scope; the second is for User scope. Multiple units on one host can be queried together.</p></div>
+        <div class="host-command-group"><strong>Open Status</strong><pre>/usr/bin/systemctl status --no-pager -n 35 UNIT
+/usr/bin/systemctl --user status --no-pager -n 35 UNIT</pre></div>
+        <div class="host-command-group"><strong>Read recent and live logs</strong><pre>/usr/bin/journalctl -u UNIT -n N --no-pager -o short-iso
+/usr/bin/journalctl -u UNIT -n N --no-pager -o short-iso --follow</pre><p>User scope adds <code>--user</code> immediately after <code>/usr/bin/journalctl</code>. Live following keeps one SSH command running until paused or closed.</p></div>
+        <div class="host-command-group"><strong>Start, Stop, Restart · User scope</strong><pre>/usr/bin/systemctl --user start UNIT
+/usr/bin/systemctl --user stop UNIT
+/usr/bin/systemctl --user restart UNIT</pre></div>
+        <div class="host-command-group"><strong>Start, Stop, Restart · System scope</strong><pre>/usr/bin/sudo -n /usr/bin/systemctl start UNIT
+/usr/bin/sudo -n /usr/bin/systemctl stop UNIT
+/usr/bin/sudo -n /usr/bin/systemctl restart UNIT</pre></div>
+        <p><strong>Open ports:</strong> The dashboard checks each assigned TCP Port from this host. Select one service or Port and enable Live to repeat only that check every 3 seconds. No socket scan or remote shell is used for Port checks.</p>
+      </section>
+      <section>
+        <h3>Required permissions</h3>
+        <div class="host-guide-row"><strong>SSH identity</strong><p>Use a non-root account. Add this dashboard’s public key to that account’s <code>~/.ssh/authorized_keys</code>; set <code>~/.ssh</code> to mode 700 and <code>authorized_keys</code> to 600. Compare the server fingerprint through a trusted channel before selecting Trust host.</p></div>
+        <div class="host-guide-row"><strong>User services</strong><p>The SSH account needs a working user manager and access to its own journal. An administrator can keep the manager running after logout:</p></div><pre>sudo loginctl enable-linger USERNAME</pre>
+        <div class="host-guide-row"><strong>System logs</strong><p>Reading the system journal normally needs <code>systemd-journal</code> or <code>adm</code> membership; journal reads do not use sudo. An administrator can grant journal group access:</p></div><pre>sudo usermod -aG systemd-journal USERNAME</pre>
+        <div class="host-guide-row"><strong>System control</strong><p>Allow only the required unit and actions through exact <code>NOPASSWD</code> sudo rules. The dashboard uses <code>sudo -n</code> and never asks for a password.</p></div><pre>USERNAME ALL=(root) NOPASSWD: /usr/bin/systemctl start example.service, /usr/bin/systemctl stop example.service, /usr/bin/systemctl restart example.service</pre>
+        <p>Edit with <code>sudo visudo -f /etc/sudoers.d/host-dashboard</code> and validate with <code>sudo visudo -c</code>. Replace <code>USERNAME</code> and <code>example.service</code> for each allowed unit. These setup commands are run by an administrator, not by the dashboard.</p>
+      </section>
+      <section>
+        <h3>How the SSH session works</h3>
+        <p>Each operation sends one fixed, noninteractive command over SSH. No PTY, stdin, password prompt or forwarding is used; strict host key checking stays on. OpenSSH can internally use the account’s shell with <code>-c</code> to run that command, but the dashboard does not open an interactive login shell or accept arbitrary command text.</p>
+        <p>Host-key scanning runs on the dashboard machine. The private key stays there. The website’s Open action opens a URL in your browser; it does not create an SSH tunnel. Services without a systemd unit have no remote status, controls or logs. Removing a dashboard entry does not stop its unit or remove the public key from the remote host.</p>
+      </section>
+    </div>
+    <footer class="host-dialog-footer"><button id="host-help-done" type="button" class="button button-primary">Got it</button></footer>
+  </dialog>
+
+  <div id="host-trust-modal" class="modal-backdrop" hidden><section class="confirm-modal host-trust-dialog" role="dialog" aria-modal="true" aria-labelledby="host-trust-title"><span class="confirm-icon rename-icon">◇</span><h2 id="host-trust-title">Verify host identity</h2><p>Compare this fingerprint with the server console or a trusted administrator. A network scan alone does not verify identity.</p><strong id="host-trust-address"></strong><code id="host-trust-fingerprint"></code><p class="host-fingerprint-hint">On the remote host: <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> (use the matching key type).</p><label class="add-favorite"><input id="host-trust-verified" type="checkbox"><span>I verified this fingerprint independently</span></label><div class="modal-actions"><button id="host-trust-cancel" class="button button-secondary" type="button">Cancel</button><button id="host-trust-accept" class="button button-primary" type="button" disabled>Trust host</button></div></section></div>
+  <div id="manage-confirm-modal" class="modal-backdrop" hidden><section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="manage-confirm-title"><span class="confirm-icon">!</span><h2 id="manage-confirm-title"></h2><p id="manage-confirm-copy"></p><div class="modal-actions"><button id="manage-confirm-cancel" class="button button-secondary" type="button">Cancel</button><button id="manage-confirm-accept" class="button button-danger" type="button">Remove</button></div></section></div>
+
+  <div id="confirm-modal" class="modal-backdrop" hidden>
+    <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <span id="confirm-icon" class="confirm-icon">↻</span><h2 id="confirm-title">Restart service?</h2><p id="confirm-copy">This will briefly interrupt the service.</p>
+      <div class="modal-actions"><button id="confirm-cancel" class="button button-secondary" type="button">Cancel</button><button id="confirm-accept" class="button button-danger" type="button">Restart service</button></div>
+    </section>
+  </div>
+
+  <div id="rename-modal" class="modal-backdrop" hidden>
+    <section class="confirm-modal rename-modal service-edit-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+      <div class="service-edit-heading"><div><p class="eyebrow">SERVICE CONFIGURATION</p><h2 id="rename-title">Edit service</h2></div><button id="rename-cancel" class="icon-button" type="button" aria-label="Close service editor">×</button></div>
+      <form id="rename-form">
+        <div class="service-form-rows">
+          <div class="service-form-row"><label for="service-host">Host</label><div class="service-field-control"><select id="service-host" required></select></div></div>
+          <div class="service-form-row"><label for="service-display-name">Display name</label><div class="service-field-control"><input id="service-display-name" maxlength="80" required></div></div>
+          <div class="service-form-row"><label for="service-category">Category</label><div class="service-field-control"><select id="service-category"><option>Websites</option><option>Tools</option><option>Automation</option><option>Gateways</option><option>Monitoring</option><option>Network</option><option>Remote Access</option><option>Management</option><option>Other</option></select></div></div>
+          <div id="service-scope-row" class="service-form-row"><label for="service-scope">Service scope</label><div class="service-field-control"><select id="service-scope"><option value="user">User · current account</option><option value="system">System · host-wide</option></select></div></div>
+          <div class="service-form-row"><label for="service-description">Description</label><div class="service-field-control"><textarea id="service-description" data-auto-height maxlength="240" rows="1"></textarea></div></div>
+          <div id="service-port-row" class="service-form-row"><label for="service-port">Service port</label><div class="service-field-control"><input id="service-port" type="number" min="1" max="65535" inputmode="numeric" placeholder="e.g. 8765"></div></div>
+          <div id="service-unit-row" class="service-form-row"><label for="service-unit">systemd unit</label><div class="service-field-control"><input id="service-unit" maxlength="200" placeholder="my-project.service"></div></div>
+          <div class="service-form-row"><label for="service-open-url">Open URL</label><div class="service-field-control"><input id="service-open-url" type="url" maxlength="2048" autocomplete="url" placeholder="https://service.example.com"></div></div>
+          <div class="service-form-row"><label for="service-favorite">Favorites</label><div class="service-field-control"><label class="add-favorite"><input id="service-favorite" type="checkbox"><span>☆ Add to favorites</span></label></div></div>
+        </div>
+        <p id="service-edit-note" class="service-edit-note"></p>
+        <div class="rename-actions port-edit-actions"><button id="service-port-delete" class="button button-danger port-delete-button" type="button" hidden>Remove port</button><button id="service-edit-cancel" class="button button-secondary" type="button">Cancel</button><button class="button button-primary" type="submit">Save settings</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="service-port-modal" class="modal-backdrop" hidden>
+    <section class="confirm-modal rename-modal service-edit-modal" role="dialog" aria-modal="true" aria-labelledby="service-port-title">
+      <div class="service-edit-heading"><div><p class="eyebrow">OPEN PORTS</p><h2 id="service-port-title">Service port details</h2></div><div class="service-port-heading-actions"><button id="service-port-open-service" class="button button-secondary" type="button">View service ↗</button><button id="service-port-close" class="icon-button" type="button" aria-label="Close port details">×</button></div></div>
+      <div class="service-port-readonly-content">
+        <div class="service-form-rows">
+          <div class="service-form-row"><span class="port-static-label">Service</span><div class="service-field-control"><strong id="service-port-name"></strong></div></div>
+          <div class="service-form-row"><span class="port-static-label">Host</span><div class="service-field-control"><span id="service-port-host"></span></div></div>
+          <div class="service-form-row"><span class="port-static-label">Port</span><div class="service-field-control"><strong id="service-port-only"></strong></div></div>
+        </div>
+        <p class="service-edit-note">This port belongs to a service. Manage its settings in Services.</p>
+      </div>
+    </section>
+  </div>
+
+  <aside id="detail-drawer" class="drawer" aria-hidden="true">
+    <div class="drawer-scrim" data-close-drawer></div>
+    <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <header class="drawer-header"><div class="drawer-heading"><span id="drawer-status-icon" class="service-mark">S</span><div><p id="drawer-category" class="eyebrow">SERVICE</p><h2 id="drawer-title">Service details</h2></div></div><div class="drawer-header-actions"><button id="drawer-favorite" class="icon-button favorite-toggle" type="button" aria-label="Add to favorites" aria-pressed="false" title="Add to favorites">☆</button><button id="drawer-rename" class="icon-button rename-drawer-button" type="button" title="Edit service settings" aria-label="Edit service settings">✎</button><button id="drawer-export" class="icon-button" type="button" title="Export this service as JSON" aria-label="Export this service as JSON">↓</button><button id="drawer-remove" class="icon-button" type="button" title="Remove from dashboard" aria-label="Remove from dashboard" hidden>⌫</button><button class="icon-button" type="button" data-close-drawer aria-label="Close details">×</button></div></header>
+      <div class="drawer-summary-row">
+        <div class="drawer-summary-details">
+          <p id="drawer-description" class="drawer-description"></p>
+          <div id="drawer-meta" class="drawer-meta"></div>
+          <p class="drawer-checked"><span>Last checked</span><time id="drawer-checked-at">Not checked yet</time></p>
+        </div>
+        <div class="drawer-actions" id="drawer-actions"></div>
+      </div>
+      <div class="drawer-tabs" role="tablist"><button class="drawer-tab active" data-tab="logs" role="tab" type="button">Logs</button><button class="drawer-tab" data-tab="status" role="tab" type="button">Status</button></div>
+      <section id="drawer-logs" class="drawer-tab-panel">
+        <div class="log-toolbar"><label class="log-search"><span>⌕</span><input id="log-search" type="search" placeholder="Filter log messages…"></label><select id="log-severity" aria-label="Filter log severity"><option value="all">All levels</option><option value="error">Errors</option><option value="warning">Warnings</option></select></div>
+        <div class="log-live-row"><span class="live-dot"></span><span id="log-live-label">Following live</span><button id="log-pause" class="text-button" type="button">Pause</button><button id="log-refresh" class="text-button" type="button">Recent</button><span class="log-copy-label">Copy</span><div class="log-copy-controls" role="group" aria-label="Copy recent log lines"><button class="text-button log-copy-button" type="button" data-copy-logs="5" aria-label="Copy the most recent 5 log lines" title="Copy most recent 5 log lines">5</button><button class="text-button log-copy-button" type="button" data-copy-logs="10" aria-label="Copy the most recent 10 log lines" title="Copy most recent 10 log lines">10</button><button class="text-button log-copy-button" type="button" data-copy-logs="20" aria-label="Copy the most recent 20 log lines" title="Copy most recent 20 log lines">20</button></div></div>
+        <div id="log-viewer" class="log-viewer"><div class="loading-state">Loading journal…</div></div>
+      </section>
+      <section id="drawer-status" class="drawer-tab-panel status-panel" hidden><pre id="status-output">Loading status…</pre></section>
+    </section>
+  </aside>
+
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

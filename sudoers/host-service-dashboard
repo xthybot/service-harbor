@@ -1,0 +1,3 @@
+@DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl start host-device-monitor.service
+@DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl stop host-device-monitor.service
+@DASHBOARD_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl restart host-device-monitor.service

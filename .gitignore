@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/
+.env
+.env.*
+!.env.example
+*.env
+*.log
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.bak
+.DS_Store

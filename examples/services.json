@@ -1,0 +1,17 @@
+{
+  "format": "host-service-dashboard-services",
+  "version": 1,
+  "services": [
+    {
+      "service_type": "local",
+      "scope": "user",
+      "unit": "example-web.service",
+      "display_name": "Example Web",
+      "description": "Optional example; replace the unit and port before importing.",
+      "category": "Websites",
+      "port": 9000,
+      "open_url": "",
+      "favorite": false
+    }
+  ]
+}
