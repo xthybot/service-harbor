@@ -87,3 +87,7 @@ GitHub 分享 repository 只保存程式、通用範例與文件。實際密碼�
 ## 驗收
 
 六項分享修正的 task 與可重跑驗收見 [TASKS.md](TASKS.md) 和 [驗收紀錄](docs/RELEASE_ACCEPTANCE.zh-TW.md)。測試只使用臨時資料與模擬日誌程序，不需控制正式服務。
+
+## 授權
+
+本專案可由著作權人授權的原創程式碼與文件採用 [MIT License](LICENSE)，署名為 `Copyright (c) 2026 xthywork`。第三方套件與素材仍依各自授權條款，不因本專案的 MIT 授權而變更；授權盤點與保留的原始聲明見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
