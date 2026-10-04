@@ -2,6 +2,8 @@
 
 日期：2026-10-04。此紀錄區分原始碼、隔離模擬與真實環境；以本次提交的檔案及測試輸出為準。
 
+實作提交：`3e2a211`。已快轉合併至本機 `main`；沒有推送 GitHub，也沒有部署正式服務。
+
 | 問題 | 原始碼修正 | 隔離測試證據 |
 | --- | --- | --- |
 | 登出失敗卻顯示成功；舊登入回應污染新世代 | `async-state.js` 以 auth epoch 及 AbortController 管理請求；`app.js` 統一清理視窗、待確認、inventory、Live、Tracking、SSE，登出期間鎖住登入並以 epoch 拒絕舊回應，失敗顯示 Retry sign out。後端撤銷 token 不發刪除 cookie 回應 | `frontend-async.test.cjs`：403 登出、登出期間登入、舊 401／晚回 body、modal 清理、重試與 SSE session 去重退避；`test_consistency.py` 檢查登出回應不刪後來的 cookie |
