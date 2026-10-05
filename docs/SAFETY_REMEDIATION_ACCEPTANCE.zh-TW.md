@@ -28,3 +28,13 @@
 - 唯讀確認這台測試主機為 Ubuntu 24.04.3 LTS、Python 3.12.3。未在正式主機執行重新安裝、reset、uninstall、systemd 啟停、SSH 控制或實體重新開機。
 - 未動態驗證其他 Ubuntu／Python 版本、真實 SSH journal cursor 或 journal vacuum 的系統行為；mock 驗證的是命令建構、缺口顯示與串流清理。正式部署前應在一次性 Ubuntu 環境跑安裝／遷移／移除，再按相同版本於測試主機核對日誌續傳。
 - 尚未部署執行中的 Dashboard，也未推送 GitHub。更新正式服務需要另行授權；部署前需私密備份資料、確認 DATA_DIR ownership、核對實際 unit 與 user manager UnitPath。若既有部署缺 ownership 標記，依安裝文件執行離線 `adopt-data`。
+
+## 2026-10-05：卸載 pin 清理的失敗重試修正
+
+根因：原先 `cleanup_data()` 以 `hosts.json` 計算 pin 清單，卻先刪除 `hosts.json`，再刪除 `ssh/*.known_hosts`。若 pin 刪除失敗，重跑時清單變空，造成已登記 pin 殘留。
+
+修正：刪除資料前先把經驗證的 pin 檔名寫入專用清理紀錄，摘要存入安裝收據。重試核對歸屬、路徑、檔案類型、摘要與檔名；紀錄損壞、竄改、symlink 或不合法檔名均停止。成功後才清除紀錄。未知 pin 與混用 `ssh/` 內容保留。
+
+隔離驗收：`tests/test_lifecycle.py` 使用 `TemporaryDirectory`、虛構主機資料及模擬 systemctl；注入已刪 `hosts.json` 後的 pin 刪除錯誤，重跑確認只刪登記 pin；另檢查損壞與遭竄改紀錄、路徑穿越、symlink、紀錄建立失敗，以及資料清完但紀錄刪除失敗後再次重試。`/home/xthybot/host-service-dashboard/.venv/bin/python -m unittest discover -s tests -q` 共 93 項通過；`python -m py_compile scripts/lifecycle.py tests/test_lifecycle.py` 與 `git diff --check` 通過。此次沒有讀取正式 SSH key、正式資料，也沒有執行正式 sudo 或服務啟停。
+
+未實機驗證：真實 Ubuntu 卸載、權限故障恢復、突然斷電後的持久性，以及舊版已遺失 `hosts.json` 且沒有清理紀錄的殘留 pin 辨識。舊版殘留需人工核對，不能按檔名通配刪除。此次未部署、未推送 GitHub。

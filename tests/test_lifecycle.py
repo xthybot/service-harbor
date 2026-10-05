@@ -1,5 +1,6 @@
 """Isolated lifecycle regression; never executes real system operations."""
 import base64
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -66,6 +67,7 @@ class LifecycleSafety(unittest.TestCase):
 
     def owned(self):
         lc.require_owner(self.data, create=True)
+        self.receipt()
 
     def fake_ctl(self, *args, **kwargs):
         from subprocess import CompletedProcess
@@ -134,6 +136,145 @@ class LifecycleSafety(unittest.TestCase):
             self.assertEqual(json.loads(lc.RECEIPT.read_text())['data'], str(self.data))
             lc.uninstall()
         self.assertFalse(lc.RECEIPT.exists()); self.assertFalse(self.data.exists())
+
+    def test_uninstall_retry_removes_registered_pin_after_hosts_file_was_deleted(self):
+        self.owned(); self.receipt()
+        ssh = self.data / 'ssh'; ssh.mkdir()
+        known = ssh / ('a' * 32 + '.known_hosts')
+        unknown = ssh / ('b' * 32 + '.known_hosts')
+        personal = ssh / 'personal_key'
+        known.write_text('fictional dashboard pin')
+        unknown.write_text('fictional unrelated pin')
+        personal.write_text('fictional personal file')
+        lc.storage.write('hosts.json', [{'id': 'a' * 32}])
+        original_unlink = Path.unlink
+        def fail_pin(path, *args, **kwargs):
+            if path == known: raise PermissionError('injected registered pin deletion failure')
+            return original_unlink(path, *args, **kwargs)
+        with patch.object(lc, 'ctl', side_effect=self.fake_ctl), patch('builtins.input', return_value='REMOVE'):
+            with patch.object(Path, 'unlink', fail_pin):
+                with self.assertRaises(PermissionError): lc.uninstall()
+            self.assertFalse((self.data / 'hosts.json').exists())
+            self.assertTrue(known.exists())
+            self.assertTrue(lc.RECEIPT.exists())
+            self.assertTrue((self.data / '.dashboard-uninstall-pins.json').exists())
+            lc.uninstall()
+        self.assertFalse(known.exists())
+        self.assertFalse((self.data / '.dashboard-uninstall-pins.json').exists())
+        self.assertFalse(lc.RECEIPT.exists())
+        self.assertEqual(unknown.read_text(), 'fictional unrelated pin')
+        self.assertEqual(personal.read_text(), 'fictional personal file')
+
+    def test_corrupt_pin_cleanup_record_stops_retry_before_unknown_deletion(self):
+        self.owned(); self.receipt()
+        ssh = self.data / 'ssh'; ssh.mkdir()
+        known = ssh / ('a' * 32 + '.known_hosts')
+        unknown = ssh / ('b' * 32 + '.known_hosts')
+        known.write_text('fictional dashboard pin')
+        unknown.write_text('fictional unrelated pin')
+        lc.storage.write('hosts.json', [{'id': 'a' * 32}])
+        original_unlink = Path.unlink
+        def fail_pin(path, *args, **kwargs):
+            if path == known: raise PermissionError('injected')
+            return original_unlink(path, *args, **kwargs)
+        with patch.object(lc, 'ctl', side_effect=self.fake_ctl), patch('builtins.input', return_value='REMOVE'):
+            with patch.object(Path, 'unlink', fail_pin):
+                with self.assertRaises(PermissionError): lc.uninstall()
+            record = self.data / '.dashboard-uninstall-pins.json'
+            pristine = record.read_text()
+            record.write_text(pristine.replace('a' * 32, 'b' * 32))
+            with self.assertRaises(RuntimeError): lc.uninstall()
+            self.assertTrue(known.exists())
+            self.assertEqual(unknown.read_text(), 'fictional unrelated pin')
+            record.write_text('{broken json')
+            with self.assertRaises((RuntimeError, ValueError)):
+                lc.uninstall()
+            self.assertTrue(known.exists())
+            self.assertTrue(unknown.exists())
+            crafted = json.loads(pristine)
+            crafted['pins'] = ['../personal.known_hosts']
+            content = json.dumps(crafted, sort_keys=True, separators=(',', ':')) + '\n'
+            record.write_text(content)
+            receipt = json.loads(lc.RECEIPT.read_text())
+            receipt['pin_cleanup_sha256'] = hashlib.sha256(content.encode()).hexdigest()
+            lc.RECEIPT.write_text(json.dumps(receipt))
+            with self.assertRaises(RuntimeError): lc.uninstall()
+            self.assertTrue(known.exists())
+            self.assertTrue(unknown.exists())
+            wrong_owner = json.loads(pristine)
+            wrong_owner['owner']['uid'] = lc.UID + 1
+            content = json.dumps(wrong_owner, sort_keys=True, separators=(',', ':')) + '\n'
+            record.write_text(content)
+            receipt['pin_cleanup_sha256'] = hashlib.sha256(content.encode()).hexdigest()
+            lc.RECEIPT.write_text(json.dumps(receipt))
+            with self.assertRaises(RuntimeError): lc.uninstall()
+            self.assertTrue(known.exists())
+            self.assertTrue(unknown.exists())
+
+    def test_pin_cleanup_record_symlink_stops_retry(self):
+        self.owned(); self.receipt()
+        ssh = self.data / 'ssh'; ssh.mkdir()
+        known = ssh / ('a' * 32 + '.known_hosts')
+        known.write_text('fictional dashboard pin')
+        lc.storage.write('hosts.json', [{'id': 'a' * 32}])
+        original_unlink = Path.unlink
+        def fail_pin(path, *args, **kwargs):
+            if path == known: raise PermissionError('injected')
+            return original_unlink(path, *args, **kwargs)
+        with patch.object(lc, 'ctl', side_effect=self.fake_ctl), patch('builtins.input', return_value='REMOVE'):
+            with patch.object(Path, 'unlink', fail_pin):
+                with self.assertRaises(PermissionError): lc.uninstall()
+            record = self.data / '.dashboard-uninstall-pins.json'
+            outside = self.root / 'personal'; outside.write_text('untouched')
+            record.unlink(); record.symlink_to(outside)
+            with self.assertRaises(RuntimeError): lc.uninstall()
+        self.assertTrue(known.exists())
+        self.assertEqual(outside.read_text(), 'untouched')
+
+    def test_retry_finishes_record_deletion_after_data_cleanup_completed(self):
+        self.owned(); self.receipt()
+        ssh = self.data / 'ssh'; ssh.mkdir()
+        known = ssh / ('a' * 32 + '.known_hosts')
+        known.write_text('fictional dashboard pin')
+        lc.storage.write('hosts.json', [{'id': 'a' * 32}])
+        record = self.data / '.dashboard-uninstall-pins.json'
+        original_unlink = Path.unlink
+        def fail_record(path, *args, **kwargs):
+            if path == record: raise PermissionError('injected record removal failure')
+            return original_unlink(path, *args, **kwargs)
+        with patch.object(lc, 'ctl', side_effect=self.fake_ctl), patch('builtins.input', return_value='REMOVE'):
+            with patch.object(Path, 'unlink', fail_record):
+                with self.assertRaises(PermissionError): lc.uninstall()
+            self.assertFalse(known.exists())
+            self.assertEqual(json.loads(lc.RECEIPT.read_text())['uninstall_stage'], 'data-cleared')
+            self.assertTrue(record.exists())
+            lc.uninstall()
+        self.assertFalse(record.exists())
+        self.assertFalse(lc.RECEIPT.exists())
+
+    def test_retry_reconstructs_record_if_creation_failed_before_any_data_deletion(self):
+        self.owned(); self.receipt()
+        ssh = self.data / 'ssh'; ssh.mkdir()
+        known = ssh / ('a' * 32 + '.known_hosts')
+        known.write_text('fictional dashboard pin')
+        lc.storage.write('hosts.json', [{'id': 'a' * 32}])
+        record = self.data / '.dashboard-uninstall-pins.json'
+        original_atomic = lc.atomic
+        failed = False
+        def fail_record_creation(path, content):
+            nonlocal failed
+            if path == record and not failed:
+                failed = True; raise PermissionError('injected record creation failure')
+            return original_atomic(path, content)
+        with patch.object(lc, 'ctl', side_effect=self.fake_ctl), patch('builtins.input', return_value='REMOVE'):
+            with patch.object(lc, 'atomic', side_effect=fail_record_creation):
+                with self.assertRaises(PermissionError): lc.uninstall()
+            self.assertTrue((self.data / 'hosts.json').exists())
+            self.assertFalse(record.exists())
+            self.assertIn('pin_cleanup_sha256', json.loads(lc.RECEIPT.read_text()))
+            lc.uninstall()
+        self.assertFalse(known.exists())
+        self.assertFalse(lc.RECEIPT.exists())
 
     def test_final_stage_failure_can_retry_after_env_and_marker_are_gone(self):
         self.owned(); self.receipt()

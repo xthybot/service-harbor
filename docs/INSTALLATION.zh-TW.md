@@ -131,13 +131,16 @@ bash scripts/uninstall.sh
 
 - 停止、停用並刪除 Dashboard 單元，重新載入對應 systemd manager。
 - 完成資料清除後才刪除密碼環境檔與 install.json；移除舊版 setup 產生的本機 sudoers **候選檔**。中途失敗保留原資料位置紀錄，重跑會繼續。
-- 刪除專案 `data/`（包含 Hosts、服務、session、SSH 私鑰及 known_hosts）與 `.venv/`。
-- 自訂 `DASHBOARD_DATA_DIR` 只刪已知 Dashboard JSON、專用 SSH key 與 hosts.json 中登記的 pinned known_hosts，不遞迴刪除外部目錄或混用 ssh/ 的未知檔案。
+- 清除專案資料目錄內已確認屬於 Dashboard 的 Hosts、服務、session、SSH 私鑰與 pinned known_hosts，並刪除 `.venv/`；資料目錄只有在清空後才移除。
+- 在刪除 `hosts.json` 前，先將其中登記的 pin 檔名寫入 `data/.dashboard-uninstall-pins.json`，並將該紀錄的摘要寫入 `install.json`。pin 檔名僅接受 32 位小寫十六進位 ID 加 `.known_hosts`；清理時核對安裝歸屬、檔案類型、symlink 與摘要。若中途刪除失敗，原資料位置與 pin 紀錄保留；重跑移除時即使 `hosts.json` 已不存在，也只重試這份紀錄中的 pin。全部清除後才刪除紀錄。
+- 自訂 `DASHBOARD_DATA_DIR` 不會遞迴刪除混用的 `ssh/` 目錄；未知 pin 與個人檔案會保留。紀錄若損壞、遭修改、與收據不符或變成 symlink，腳本會停止，需從可信備份核對原紀錄，不能以放寬檔名規則重試。
 - 原始碼、其他服務、系統 journal、現有 `/etc/sudoers.d` 規則、帳號群組、linger 與防火牆設定皆保留。
 
 不自動停用 linger，因為該帳號的其他 user services 可能依賴它。此版未建立 sudoers，故不刪除管理員既有的權限設定。遠端主機 `authorized_keys` 的舊公鑰需自行移除；重新安裝產生的新 key 必須重新部署至遠端。瀏覽器 localStorage 的追蹤倒數屬於瀏覽器資料，主機移除腳本不會清除它。
 
 清理前核對 data 目錄的 `.dashboard-owner.json` 所屬專案／帳號／UID／路徑與 install.json、dashboard.env 的 DATA_DIR。舊安裝若尚無 ownership 標記，先停止 Dashboard、核對資料路徑，再執行 `python3 scripts/lifecycle.py adopt-data`，輸入 `ADOPT` 後才可重跑 setup／reset／uninstall。這一步不會清除資料。若檔案路徑含 `..`、symlink、共享系統根目錄，或 ENV／receipt 不一致，腳本會拒絕執行；先人工核對並修正原始記錄。
+
+若舊版移除早已刪除 `hosts.json`，且當時沒有留下 pin 清理紀錄，新版不會靠 `*.known_hosts` 檔名猜測歸屬並自動刪除。請先從可信備份或原主機清單人工核對殘留 pin；核對前不要刪除混用目錄中的其他檔案。
 
 若需離線撤銷所有登入：先停止 Dashboard，再執行 `python3 scripts/lifecycle.py revoke-sessions`。此命令先經共用儲存層完成未結束交易的復原，再寫入空 sessions.json；不可直接刪交易日誌。
 
@@ -157,4 +160,4 @@ sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp
 
 ## 目前驗證範圍
 
-此版在 Ubuntu 24.04.3 LTS、Python 3.12.3 上執行隔離的 lifecycle 模擬測試；涵蓋 venv／uv 路徑、systemd/sudo 模擬、清理失敗重試及回復錯誤。未在正式主機執行完整重裝、模式遷移、移除或開機後登入前啟動測試。其他 Ubuntu／Python 版本需先於一次性環境驗證相同流程；請勿將「Ubuntu」概括為全部版本已驗證。
+此版在 Ubuntu 24.04.3 LTS、Python 3.12.3 上執行隔離的 lifecycle 模擬測試；涵蓋 venv／uv 路徑、systemd/sudo 模擬、`hosts.json` 已刪但 pin 刪除失敗後重試、清理紀錄損壞／竄改與回復錯誤。未在正式主機執行完整重裝、模式遷移、移除或開機後登入前啟動測試。其他 Ubuntu／Python 版本需先於一次性環境驗證相同流程；請勿將「Ubuntu」概括為全部版本已驗證。

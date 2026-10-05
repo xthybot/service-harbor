@@ -3,6 +3,7 @@
 import argparse
 import getpass
 import fcntl
+import hashlib
 import ipaddress
 import json
 import os
@@ -162,6 +163,8 @@ DATA_FILES = ('bookmarks.json', 'sessions.json', 'hosts.json', 'registered-servi
               'service-metadata.json', 'service-names.json', 'service-open-urls.json',
               'service-ports.json', 'service-favorites.json', 'manual-ports.json', 'local-catalog.json')
 OWNER_FILE = '.dashboard-owner.json'
+PIN_RECORD = '.dashboard-uninstall-pins.json'
+PIN_NAME = re.compile(r'[0-9a-f]{32}\.known_hosts\Z')
 
 
 def receipt_data():
@@ -230,7 +233,7 @@ def require_owner(data, *, create=False):
 def preflight_data(data):
     """Validate types before recovery; never follow a JSON or SSH symlink."""
     safe_path(data)
-    for name in (*DATA_FILES, storage.JOURNAL, '.json.lock', OWNER_FILE): safe_file(data / name)
+    for name in (*DATA_FILES, storage.JOURNAL, '.json.lock', OWNER_FILE, PIN_RECORD): safe_file(data / name)
     ssh = data / 'ssh'
     safe_path(ssh)
     if ssh.exists() and not ssh.is_dir(): fail('Dashboard ssh path must be a directory.')
@@ -614,18 +617,99 @@ def rollback_install(installed, previous, touched, snapshots, data):
     return results
 
 
+def _pin_record_text(data, names):
+    if (not isinstance(names, list)
+            or any(not isinstance(name, str) or not PIN_NAME.fullmatch(name) for name in names)
+            or names != sorted(set(names))):
+        fail('Invalid Dashboard SSH pin cleanup list; inspect the installation before retrying.')
+    return json.dumps({'version': 1, 'owner': owner_value(data), 'pins': names},
+                      sort_keys=True, separators=(',', ':')) + '\n'
+
+
+def _pins_from_hosts(data):
+    hosts = storage.read('hosts.json', [])
+    if not isinstance(hosts, list): fail('hosts.json must contain a list before cleaning SSH pins.')
+    names = []
+    for host in hosts:
+        if not isinstance(host, dict) or not isinstance(host.get('id'), str):
+            fail('Invalid host identity; inspect hosts.json before uninstalling.')
+        name = host['id'] + '.known_hosts'
+        if not PIN_NAME.fullmatch(name): fail('Invalid host ID for SSH pin cleanup.')
+        names.append(name)
+    return sorted(set(names))
+
+
+def _load_pin_record(data, receipt):
+    path = data / PIN_RECORD
+    safe_file(path)
+    digest = receipt.get('pin_cleanup_sha256')
+    if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+        fail('Installation receipt has no valid SSH pin cleanup checksum.')
+    if not path.exists():
+        # The receipt is written before the record. No data deletion can begin
+        # until both exist; reconstruct only while the original hosts remain.
+        if not (data / 'hosts.json').exists():
+            fail('SSH pin cleanup record is missing after hosts.json was removed; stop for manual review.')
+        candidate = _pin_record_text(data, _pins_from_hosts(data))
+        if hashlib.sha256(candidate.encode()).hexdigest() != digest:
+            fail('SSH pin cleanup record cannot be reconstructed from hosts.json.')
+        atomic(path, candidate)
+        path.chmod(0o600)
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != digest:
+        fail('SSH pin cleanup record changed; stop before deleting more data.')
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeError) as error:
+        raise RuntimeError('SSH pin cleanup record is damaged; stop before deleting more data.') from error
+    if not isinstance(value, dict) or value.get('version') != 1 or value.get('owner') != owner_value(data):
+        fail('SSH pin cleanup record ownership does not match this installation.')
+    if raw != _pin_record_text(data, value.get('pins')).encode():
+        fail('SSH pin cleanup record format changed; stop before deleting more data.')
+    return value['pins']
+
+
+def _prepare_pin_record(data):
+    receipt = receipt_data()
+    if receipt.get('data') != str(data): fail('SSH pin cleanup receipt points to another DATA_DIR.')
+    path = data / PIN_RECORD
+    safe_file(path)
+    if 'pin_cleanup_sha256' not in receipt:
+        if path.exists(): fail('Unrecorded SSH pin cleanup file exists; stop for manual review.')
+        if not (data / 'hosts.json').exists():
+            # A legacy interrupted uninstall has no trustworthy host IDs.
+            if (data / 'ssh').exists() and any(PIN_NAME.fullmatch(item.name) for item in (data / 'ssh').iterdir()):
+                fail('hosts.json is missing and SSH pins remain without a cleanup record; review them manually.')
+        content = _pin_record_text(data, _pins_from_hosts(data))
+        receipt['pin_cleanup_sha256'] = hashlib.sha256(content.encode()).hexdigest()
+        atomic(RECEIPT, json.dumps(receipt) + '\n')
+        atomic(path, content)
+        path.chmod(0o600)
+    return _load_pin_record(data, receipt_data())
+
+
+def _finish_pin_record(data):
+    receipt = receipt_data()
+    path = data / PIN_RECORD
+    safe_file(path)
+    if path.exists():
+        _load_pin_record(data, receipt)
+        path.unlink()
+    elif receipt.get('uninstall_stage') != 'data-cleared':
+        fail('SSH pin cleanup record is missing before data cleanup completed.')
+
+
 def cleanup_data(data):
     require_owner(data)
     preflight_data(data)  # Never delete a recovery journal to bypass recovery.
+    pins = _prepare_pin_record(data)
     targets = [data / name for name in DATA_FILES]
     # Only exact Dashboard identity files and per-host pin files, never generic ssh/.
     ssh = data / 'ssh'
-    saved_hosts = storage.read('hosts.json', [])
-    if not isinstance(saved_hosts, list): fail('hosts.json must contain a list before cleaning SSH pins.')
-    host_ids = {host.get('id') for host in saved_hosts if isinstance(host, dict)}
     if ssh.exists():
-        targets.extend(path for path in ssh.iterdir() if path.name in ('dashboard_ed25519', 'dashboard_ed25519.pub')
-                       or (re.fullmatch(r'[0-9a-f]{32}\.known_hosts', path.name) and path.stem in host_ids))
+        targets.extend(path for path in ssh.iterdir()
+                       if path.name in ('dashboard_ed25519', 'dashboard_ed25519.pub'))
+        targets.extend(ssh / name for name in pins)
     targets.extend(path for path in data.iterdir() if re.fullmatch(r'\.json-write-[a-z0-9_]{8}', path.name))
     for path in targets: safe_file(path)
     for path in targets:
@@ -640,6 +724,10 @@ def cleanup_data(data):
         else: ssh.rmdir()
     for name in ('.json.lock',):
         path = data / name; safe_file(path); path.unlink(missing_ok=True)
+    receipt = receipt_data()
+    receipt['uninstall_stage'] = 'data-cleared'
+    atomic(RECEIPT, json.dumps(receipt) + '\n')
+    _finish_pin_record(data)
     remaining = [p.name for p in data.iterdir() if p.name != OWNER_FILE]
     if remaining: print('Retained unrecognized data entries: ' + ', '.join(sorted(remaining)))
     # Marker remains until *all* uninstall stages succeed, so retries stay authorized.
@@ -674,6 +762,7 @@ def uninstall():
         ctl(scope, 'disable', '--now', UNIT)
         remove_unit(scope); ctl(scope, 'daemon-reload')
     if not final_retry: cleanup_data(data)
+    else: _finish_pin_record(data)
     venv = APP / '.venv'
     if venv.exists():
         step('Delete virtual environment')
@@ -683,6 +772,7 @@ def uninstall():
         step(f'Delete {path.name}')
         path.unlink(missing_ok=True)
     # Persist final-stage progress before removing the last ownership marker.
+    receipt = receipt_data()  # Preserve the pin checksum and progress written by cleanup_data.
     receipt['uninstall_stage'] = 'data-cleared'
     atomic(RECEIPT, json.dumps(receipt) + '\n')
     safe_file(data / OWNER_FILE)
