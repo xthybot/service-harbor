@@ -77,21 +77,38 @@ def save_host(body: dict, host_id: str | None = None) -> dict:
     with registry.LOCK:
         records = registry.hosts()
         if host_id:
-            item = registry.host(host_id)
-            reset = any(item[k] != config[k] for k in ('address', 'port'))
+            path = _known_hosts(host_id)
+            item = next((row for row in records if row['id'] == host_id), None)
+            if item is None:
+                raise ValueError('Unknown host')
+            pending = item.get('pin_cleanup_pending')
+            if pending == 'delete':
+                raise ValueError('Host removal is unfinished. Retry Remove host before editing it.')
+            if pending not in (None, 'reset'):
+                raise ValueError('Invalid SSH pin cleanup state. Review this host before editing it.')
+            reset = pending == 'reset' or any(item[k] != config[k] for k in ('address', 'port'))
             item.update(config)
             item.update({'connection': 'Unchecked', 'checked_at': None, 'last_error': '', 'journal_access': None})
             if reset:
-                item.update({'trusted': False, 'host_key': '', 'fingerprint': '', 'pending_key': '', 'pending_fingerprint': ''})
-                _known_hosts(host_id).unlink(missing_ok=True)
+                item.update({'trusted': False, 'host_key': '', 'fingerprint': '', 'pending_key': '',
+                             'pending_fingerprint': '', 'pin_cleanup_pending': 'reset',
+                             'last_error': 'SSH pin cleanup is unfinished. Retry saving this host before verifying its fingerprint.'})
             records = [item if row['id'] == host_id else row for row in records]
+            # Persist a fail-closed state before touching the pin. If interrupted,
+            # the host ID remains available for retry and for uninstall's pin list.
+            registry.write('hosts.json', records)
+            if reset:
+                path.unlink(missing_ok=True)
+                item.pop('pin_cleanup_pending')
+                item['last_error'] = ''
+                registry.write('hosts.json', records)
         else:
             if len(records) >= 50:
                 raise ValueError('Host limit reached (50).')
             item = {'id': uuid.uuid4().hex, **config, 'trusted': False, 'connection': 'Unchecked', 'checked_at': None,
                     'last_error': '', 'journal_access': None, 'fingerprint': ''}
             records.append(item)
-        registry.write('hosts.json', records)
+            registry.write('hosts.json', records)
         return safe_host(item)
 
 
@@ -107,6 +124,8 @@ def _known_hosts(host_id: str):
 
 def scan_host(host_id: str) -> dict:
     item = registry.host(host_id)
+    if item.get('pin_cleanup_pending'):
+        raise ValueError('SSH pin cleanup is unfinished. Retry saving or removing this host first.')
     result = subprocess.run(['/usr/bin/ssh-keyscan', '-T', '4', '-p', str(item['port']), '-t', 'ed25519,ecdsa,rsa', item['address']], capture_output=True, text=True, timeout=16)
     keys = []
     for line in result.stdout.splitlines():
@@ -129,8 +148,16 @@ def scan_host(host_id: str) -> dict:
 def trust_host(host_id: str, expected: str) -> dict:
     with registry.LOCK:
         item = registry.host(host_id)
+        if item.get('pin_cleanup_pending'):
+            raise ValueError('SSH pin cleanup is unfinished. Retry saving or removing this host first.')
         if not expected or expected != item.get('pending_fingerprint') or not item.get('pending_key'):
             raise ValueError('Scan the host key and confirm the displayed fingerprint first.')
+        # A host may already be trusted with an older pin. Revoke that trust
+        # durably before replacing the file, so a later JSON failure cannot
+        # expose a new pin under an old trusted record.
+        registry.update_host(host_id, {'trusted': False, 'host_key': '', 'fingerprint': '',
+                                       'connection': 'Unchecked',
+                                       'last_error': 'Host key confirmation is unfinished. Retry Trust host.'})
         SSH_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         address = item['address'] if item['port'] == 22 else f"[{item['address']}]:{item['port']}"
         path = _known_hosts(host_id)
@@ -150,6 +177,8 @@ def trust_host(host_id: str, expected: str) -> dict:
 
 def ssh_command(host_id: str, command: list[str]) -> list[str]:
     item = registry.host(host_id)
+    if item.get('pin_cleanup_pending'):
+        raise ValueError('SSH pin cleanup is unfinished. Retry saving or removing this host first.')
     if not item.get('trusted'):
         raise ValueError('Host fingerprint has not been confirmed in Hosts.')
     if not PRIVATE_KEY.exists() or not _known_hosts(host_id).exists():
@@ -194,10 +223,21 @@ def check_host(host_id: str) -> dict:
 
 def delete_host(host_id: str) -> None:
     with registry.LOCK:
-        registry.host(host_id)
+        path = _known_hosts(host_id)
+        records = registry.hosts()
+        item = next((row for row in records if row['id'] == host_id), None)
+        if item is None:
+            raise ValueError('Unknown host')
+        if item.get('pin_cleanup_pending') not in (None, 'reset', 'delete'):
+            raise ValueError('Invalid SSH pin cleanup state. Review this host before removing it.')
         if any(item.get('host_id') == host_id for item in registry.registered_services()):
             raise ValueError('Remove this host’s registered services before deleting the host.')
         if any(item.get('host_id') == host_id for item in registry.read('manual-ports.json')):
             raise ValueError('Remove this host’s manual port entries in Open ports before deleting the host.')
-        registry.write('hosts.json', [item for item in registry.hosts() if item['id'] != host_id])
-        _known_hosts(host_id).unlink(missing_ok=True)
+        item.update({'trusted': False, 'host_key': '', 'fingerprint': '', 'pending_key': '',
+                     'pending_fingerprint': '', 'pin_cleanup_pending': 'delete',
+                     'connection': 'Unavailable',
+                     'last_error': 'Host removal is unfinished. Retry Remove host to clear its SSH pin.'})
+        registry.write('hosts.json', records)
+        path.unlink(missing_ok=True)
+        registry.write('hosts.json', [row for row in records if row['id'] != host_id])

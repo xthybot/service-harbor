@@ -41,6 +41,10 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 若網頁顯示 ecdsa 或 rsa，改用對應的 ssh_host_ecdsa_key.pub 或 ssh_host_rsa_key.pub。主機位址／SSH port 改變會撤銷既有信任；遠端更換 host key 時，StrictHostKeyChecking 會拒絕連線，核對新指紋後才重新信任。
 
+主機位址或 SSH Port 變更時，Dashboard 會先把主機寫成未信任且記錄待清理狀態，再刪除該主機 ID 對應的 pin。若刪檔或最後的資料寫入失敗，主機仍保留在清單，不能使用 SSH；修正檔案問題後，對同一主機重按 Save 即會重試清理，之後必須重新掃描並核對指紋。若第一次資料寫入失敗，原主機與 pin 都維持原狀。重新信任既有主機時也會先撤銷舊信任，再替換 pin；失敗不會讓新 pin 配上舊的 trusted 狀態。
+
+刪除主機時也會先保存未信任且待刪除的主機紀錄，刪除精確的 `<主機 ID>.known_hosts` 後才移除主機資料。若 pin 刪除失敗，按原主機的 Remove host 重試；若刪檔後程序中斷，重試也可完成主機移除。待刪除的主機 ID 仍在 `hosts.json`，因此完整 uninstall 可依其登記資訊清理 pin。清理未完成時，不會自動重新信任主機；其他主機的 pin、未知檔案及 Dashboard 私鑰不在此操作範圍。
+
 ## Journal 與控制權限
 
 user scope 使用 SSH 帳號的 `systemctl --user` 與 `journalctl --user`。帳號需要可用的 user manager；若要登出後仍有常駐服務，可由管理員執行：

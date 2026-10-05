@@ -54,8 +54,11 @@
       const rows = services.filter(service => service.host_id === host.id);
       const locked = busy.has(host.id) ? 'disabled' : '';
       const connected = host.connection === 'Connected';
-      const badge = !host.trusted ? 'Verify key' : host.connection || 'Unchecked';
-      return `<article class="ssh-host-card"><div class="ssh-host-card-top"><span class="host-device-icon">▣</span><div><h3>${esc(host.name)}</h3><code>${esc(host.username)}@${esc(host.address)}:${host.port}</code></div><span class="status-badge ${connected ? 'status-running' : host.connection === 'Unavailable' ? 'status-unavailable' : 'status-stopped'}">${esc(badge)}</span></div><div class="host-capabilities"><span class="host-capability ${host.journal_access ? 'capability-good' : ''}">${host.journal_access ? '✓ System journal' : host.journal_access === false ? '△ System journal limited' : 'Journal not checked'}</span><span class="host-capability">${host.service_count || 0} services</span>${host.systemd_available ? '<span class="host-capability capability-good">✓ systemd</span>' : ''}</div>${host.last_error ? `<p class="host-diagnostic">${esc(host.last_error)}</p>` : ''}<div class="host-unit-list">${rows.slice(0,5).map(service => `<div><span title="${esc(service.unit)}">${esc(service.display_name || service.name)}</span><span class="status-badge ${service.status === 'Running' ? 'status-running' : service.status === 'Failed' ? 'status-failed' : service.status === 'Unavailable' ? 'status-unavailable' : 'status-stopped'}">${esc(service.status)}</span></div>`).join('')}${rows.length > 5 ? `<small>+${rows.length - 5} more in Services</small>` : ''}</div><div class="host-check-time">${host.checked_at ? `Last check ${esc(new Date(host.checked_at).toLocaleString())}` : 'Connection has not been checked'}${host.fingerprint ? `<code title="${esc(host.fingerprint)}">${esc(host.fingerprint)}</code>` : ''}</div><div class="ssh-host-card-actions"><button class="button button-secondary" data-host-action="scan" data-id="${host.id}" ${locked}>${host.trusted ? 'Verify key' : 'Verify fingerprint'}</button><button class="button button-primary" data-host-action="check" data-id="${host.id}" ${locked || !host.trusted ? 'disabled' : ''}>${busy.has(host.id) ? 'Working…' : 'Check connection'}</button><button class="host-edit-button" data-host-action="edit" data-id="${host.id}" ${locked} title="Edit host">✎</button><button class="host-edit-button host-remove-button" data-host-action="delete" data-id="${host.id}" ${locked} title="Remove host">⌫</button></div></article>`;
+      const pending = host.pin_cleanup_pending;
+      const badge = pending === 'delete' ? 'Removal pending' : pending === 'reset' ? 'Pin cleanup pending' : !host.trusted ? 'Verify key' : host.connection || 'Unchecked';
+      const scanDisabled = locked || pending ? 'disabled' : '';
+      const editDisabled = locked || pending === 'delete' ? 'disabled' : '';
+      return `<article class="ssh-host-card"><div class="ssh-host-card-top"><span class="host-device-icon">▣</span><div><h3>${esc(host.name)}</h3><code>${esc(host.username)}@${esc(host.address)}:${host.port}</code></div><span class="status-badge ${connected ? 'status-running' : host.connection === 'Unavailable' ? 'status-unavailable' : 'status-stopped'}">${esc(badge)}</span></div><div class="host-capabilities"><span class="host-capability ${host.journal_access ? 'capability-good' : ''}">${host.journal_access ? '✓ System journal' : host.journal_access === false ? '△ System journal limited' : 'Journal not checked'}</span><span class="host-capability">${host.service_count || 0} services</span>${host.systemd_available ? '<span class="host-capability capability-good">✓ systemd</span>' : ''}</div>${host.last_error ? `<p class="host-diagnostic">${esc(host.last_error)}</p>` : ''}<div class="host-unit-list">${rows.slice(0,5).map(service => `<div><span title="${esc(service.unit)}">${esc(service.display_name || service.name)}</span><span class="status-badge ${service.status === 'Running' ? 'status-running' : service.status === 'Failed' ? 'status-failed' : service.status === 'Unavailable' ? 'status-unavailable' : 'status-stopped'}">${esc(service.status)}</span></div>`).join('')}${rows.length > 5 ? `<small>+${rows.length - 5} more in Services</small>` : ''}</div><div class="host-check-time">${host.checked_at ? `Last check ${esc(new Date(host.checked_at).toLocaleString())}` : 'Connection has not been checked'}${host.fingerprint ? `<code title="${esc(host.fingerprint)}">${esc(host.fingerprint)}</code>` : ''}</div><div class="ssh-host-card-actions"><button class="button button-secondary" data-host-action="scan" data-id="${host.id}" ${scanDisabled}>${host.trusted ? 'Verify key' : 'Verify fingerprint'}</button><button class="button button-primary" data-host-action="check" data-id="${host.id}" ${locked || !host.trusted || pending ? 'disabled' : ''}>${busy.has(host.id) ? 'Working…' : 'Check connection'}</button><button class="host-edit-button" data-host-action="edit" data-id="${host.id}" ${editDisabled} title="Edit host">✎</button><button class="host-edit-button host-remove-button" data-host-action="delete" data-id="${host.id}" ${locked} title="Remove host">⌫</button></div></article>`;
     }).join('');
     window.dispatchEvent(new CustomEvent('dashboard:hosts', { detail: hosts }));
   }
@@ -109,7 +112,12 @@
     try {
       await api(submittedId ? `/api/hosts/${submittedId}` : '/api/hosts', {method:submittedId ? 'PUT' : 'POST',body:JSON.stringify(body)});
       closeHostForm(true); showToast('Host saved. Verify its fingerprint before connecting.'); await load(); await window.HostDashboard.refreshAll();
-    } catch (error) { showToast(error.message,'error'); }
+    } catch (error) {
+      showToast(error.message,'error');
+      // A failed pin operation may have durably revoked trust before the error.
+      await load();
+      void window.HostDashboard.refreshAll();
+    }
     finally { hostSaving = false; button.textContent = originalLabel; [...form.elements].forEach(field => { field.disabled = false; }); }
   });
   $('#ssh-key-generate').addEventListener('click', async () => {
@@ -130,7 +138,7 @@
     if(!trustTarget||!$('#host-trust-verified').checked)return;
     const target=trustTarget; const button=$('#host-trust-accept');button.disabled=true;
     try{await api(`/api/hosts/${target.id}/trust`,{method:'POST',body:JSON.stringify({fingerprint:target.fingerprint})});closeTrust();showToast('Host fingerprint pinned. You can now check the connection.');await load();}
-    catch(error){showToast(error.message,'error');button.disabled=false;}
+    catch(error){showToast(error.message,'error');button.disabled=false;await load();void window.HostDashboard.refreshAll();}
   });
   $('#hosts-grid').addEventListener('click',async event=>{
     const button=event.target.closest('[data-host-action]');if(!button||button.disabled)return;
@@ -148,7 +156,7 @@
         const result=await api(`/api/hosts/${host.id}/check`,{method:'POST'});
         showToast(result.host.connection==='Connected'?'SSH connection verified.':'SSH connection failed. See host details.',result.host.connection==='Connected'?'success':'error');await load();await window.HostDashboard.refreshAll();
       }else if(action==='delete'){await api(`/api/hosts/${host.id}`,{method:'DELETE'});showToast('Host removed.');await load();await window.HostDashboard.refreshAll();}
-    }catch(error){showToast(error.message,'error');}
+    }catch(error){showToast(error.message,'error');await load();void window.HostDashboard.refreshAll();}
     finally{busy.delete(host.id);render();}
   });
   window.addEventListener('dashboard:ready',load);

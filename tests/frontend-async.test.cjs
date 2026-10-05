@@ -181,3 +181,40 @@ test('actual Hosts load queues a second fetch when refresh arrives during a pend
   assert.equal(h.requests.filter(r=>r.url==='/api/hosts').length,2);
   h.answer('/api/hosts',{hosts:[]});h.answer('/api/ssh-key',{public_key:'',fingerprint:''});await flush();
 });
+
+test('Hosts refreshes a changed trust state after a failed remove request',async()=>{
+  const h=harness(),listeners={};
+  h.window.addEventListener=(type,fn)=>{(listeners[type]??=[]).push(fn);};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../app/static/hosts.js'),'utf8'),h.context);
+  const first=listeners['dashboard:ready'][0]();await flush();
+  const host={id:'a'.repeat(32),name:'Example',username:'operator',address:'192.0.2.1',port:22,trusted:true,connection:'Connected'};
+  h.answer('/api/hosts',{hosts:[host]});h.answer('/api/ssh-key',{public_key:'',fingerprint:''});await first;
+  h.window.HostDashboard.confirm=async()=>true;
+  const button={disabled:false,dataset:{hostAction:'delete',id:host.id}};
+  const click=h.node('hosts-grid').emit('click',{target:{closest:()=>button}});await flush();
+  h.answer(`/api/hosts/${host.id}`,{detail:'pin could not be removed'},503);await flush();
+  assert.equal(h.requests.filter(request=>request.url==='/api/hosts').length,2);
+  h.answer('/api/hosts',{hosts:[{...host,trusted:false,connection:'Unavailable',pin_cleanup_pending:'delete',last_error:'Retry Remove host'}]});
+  h.answer('/api/ssh-key',{public_key:'',fingerprint:''});await click;
+  assert.match(h.node('hosts-grid').innerHTML,/Retry Remove host/);
+  assert.match(h.node('hosts-grid').innerHTML,/Removal pending/);
+});
+
+test('Hosts refreshes revoked trust after a failed fingerprint replacement',async()=>{
+  const h=harness(),listeners={};
+  h.window.addEventListener=(type,fn)=>{(listeners[type]??=[]).push(fn);};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../app/static/hosts.js'),'utf8'),h.context);
+  const first=listeners['dashboard:ready'][0]();await flush();
+  const host={id:'a'.repeat(32),name:'Example',username:'operator',address:'192.0.2.1',port:22,trusted:true,connection:'Connected'};
+  h.answer('/api/hosts',{hosts:[host]});h.answer('/api/ssh-key',{public_key:'',fingerprint:''});await first;
+  const button={disabled:false,dataset:{hostAction:'scan',id:host.id}};
+  const scan=h.node('hosts-grid').emit('click',{target:{closest:()=>button}});await flush();
+  h.answer(`/api/hosts/${host.id}/scan`,{fingerprint:'SHA256:fictional',algorithm:'ssh-ed25519',address:host.address,port:22});await scan;
+  h.node('host-trust-verified').checked=true;
+  const trust=h.node('host-trust-accept').emit('click');await flush();
+  h.answer(`/api/hosts/${host.id}/trust`,{detail:'host metadata write failed'},503);await flush();
+  assert.equal(h.requests.filter(request=>request.url==='/api/hosts').length,2);
+  h.answer('/api/hosts',{hosts:[{...host,trusted:false,connection:'Unchecked',last_error:'Retry Trust host'}]});
+  h.answer('/api/ssh-key',{public_key:'',fingerprint:''});await trust;
+  assert.match(h.node('hosts-grid').innerHTML,/Retry Trust host/);
+});

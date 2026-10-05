@@ -118,6 +118,7 @@ systemctl --user start host-service-dashboard.service
 | 無 system journal | 執行帳號 journal 讀取權；sudoers 不授權 journal |
 | JSON 寫入失敗 | 檔案擁有者、目錄權限、DATA_DIR 與 ReadWritePaths 是否一致 |
 | 移除時 SSH pin 刪除失敗 | 修正檔案權限後重跑 `bash scripts/uninstall.sh`；`install.json` 與 `data/.dashboard-uninstall-pins.json` 保留原清單供重試。若紀錄損壞或與收據不符，先從可信備份核對，不要用 `*.known_hosts` 通配刪除混用目錄。 |
+| Hosts 編輯或刪除顯示 pin 清理未完成 | 對同一主機重試 Save 或 Remove host；待清理主機維持未信任，SSH 連線會拒絕。Save 完成後須重新掃描並核對指紋，不會自動恢復原信任。不要手動刪除 `hosts.json` 中的待清理主機。 |
 | Open ports 的服務 Port 無法編輯 | 這類 Port 在 Open ports 是唯讀；按 View service，於 Services 編輯或移除 Port。手動 Port 仍可在 Open ports 編輯。 |
 | 開機後 Dashboard 未啟動 | user unit enabled 與帳號 Linger=yes |
 | monitor 狂重啟 | status 的 SubState／NRestarts 和修正版啟動之後的 journal；詳見監控文件 |

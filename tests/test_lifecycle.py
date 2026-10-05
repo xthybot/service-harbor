@@ -84,6 +84,19 @@ class LifecycleSafety(unittest.TestCase):
         lc.cleanup_data(self.data)
         self.assertEqual(sorted(p.name for p in ssh.iterdir()), sorted(['personal_key', 'b' * 32 + '.known_hosts']))
 
+    def test_uninstall_includes_host_with_pending_pin_deletion(self):
+        self.owned()
+        ssh = self.data / 'ssh'; ssh.mkdir()
+        pin = ssh / ('a' * 32 + '.known_hosts')
+        unrelated = ssh / ('b' * 32 + '.known_hosts')
+        pin.write_text('fictional pending pin')
+        unrelated.write_text('fictional unrelated pin')
+        lc.storage.write('hosts.json', [{'id': 'a' * 32, 'trusted': False,
+                                         'pin_cleanup_pending': 'delete'}])
+        lc.cleanup_data(self.data)
+        self.assertFalse(pin.exists())
+        self.assertEqual(unrelated.read_text(), 'fictional unrelated pin')
+
     def test_directory_impersonating_json_is_never_deleted(self):
         self.owned()
         item = self.data / 'sessions.json'; item.mkdir()

@@ -38,3 +38,19 @@
 隔離驗收：`tests/test_lifecycle.py` 使用 `TemporaryDirectory`、虛構主機資料及模擬 systemctl；注入已刪 `hosts.json` 後的 pin 刪除錯誤，重跑確認只刪登記 pin；另檢查損壞與遭竄改紀錄、路徑穿越、symlink、紀錄建立失敗，以及資料清完但紀錄刪除失敗後再次重試。`/home/xthybot/host-service-dashboard/.venv/bin/python -m unittest discover -s tests -q` 共 93 項通過；`python -m py_compile scripts/lifecycle.py tests/test_lifecycle.py` 與 `git diff --check` 通過。此次沒有讀取正式 SSH key、正式資料，也沒有執行正式 sudo 或服務啟停。
 
 未實機驗證：真實 Ubuntu 卸載、權限故障恢復、突然斷電後的持久性，以及舊版已遺失 `hosts.json` 且沒有清理紀錄的殘留 pin 辨識。舊版殘留需人工核對，不能按檔名通配刪除。此次未部署、未推送 GitHub。
+
+## 2026-10-06：SSH 主機與 pin 操作一致性修正
+
+根因：`delete_host()` 原本先從 `hosts.json` 移除主機再刪 pin，失敗後無主機 ID 可重試或供 uninstall 辨識；`save_host()` 修改位址／Port 時先刪 pin 再寫 JSON，寫入失敗可能留下 trusted 主機但缺少 pin。重新信任已有主機時也可能先替換 pin，卻因 JSON 寫入失敗而保留舊的 trusted 資料。
+
+修正：單一 `hosts.json` 原子寫入先保存未信任與 `pin_cleanup_pending` 狀態，再刪精確主機 ID 的 pin，最後寫入完成狀態或移除主機。失敗／程序中斷後可依磁碟上的同一主機資料重試；清理未完成時拒絕 SSH 與重新信任。重新信任時先撤銷舊 trusted 狀態，再替換 pin。Host 頁面遇到操作錯誤會重新載入狀態；uninstall 的 pin 清單仍可從待刪主機 ID 建立。沒有通配刪除其他 pin 或金鑰。
+
+隔離驗收：`tests/test_ssh_host_consistency.py` 使用 `TemporaryDirectory`、虛構主機／pin，注入刪 pin 錯誤、位址與 Port 首次 JSON 寫入錯誤、最後寫入錯誤、重新信任錯誤及獨立子程序中斷；重試後只清理指定 pin，未知 pin、其他主機 pin 與私鑰保持不變。`tests/test_lifecycle.py` 確認卸載清單包含待刪主機的 pin，並保留未知 pin。`tests/frontend-async.test.cjs` 驗證刪除與重新信任失敗後 Host 卡片重新載入未信任狀態，待刪狀態顯示 Removal pending。未讀取正式資料或金鑰，未執行正式 SSH、sudo 或服務控制。
+
+最終檢查：
+
+- `/home/xthybot/host-service-dashboard/.venv/bin/python -m unittest discover -s tests -q`：100 項通過；僅借用既有測試 runtime，沒有修改私人專案。
+- `node --test tests/*.test.cjs`：18 項通過。
+- `python3 -m py_compile app/ssh_hosts.py tests/test_ssh_host_consistency.py tests/test_lifecycle.py`、`node --check app/static/hosts.js` 及 `git diff --check` 均通過。
+
+未實機驗證：正式 Dashboard 的主機編輯／刪除、真實檔案權限故障與突然斷電後的使用者操作。更新執行中的後端需另行部署及重啟；此次未部署或推送。
