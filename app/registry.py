@@ -110,7 +110,9 @@ def normalize_service_fields(body: dict) -> dict:
             raise ValueError('Enter a valid service scope and unit.')
         if port is not None and not unit:
             raise ValueError('A systemd unit is required to assign a service port.')
-    return {**body, 'display_name': name, 'description': description, 'category': category,
+    from .website_checks import normalize
+    website_check = normalize(body.get('website_check'), managed=bool(unit), url=url)
+    return {**body, 'website_check': website_check, 'display_name': name, 'description': description, 'category': category,
             'service_type': kind, 'scope': scope, 'unit': unit, 'host_id': host_id,
             'open_url': url, 'port': port}
 
@@ -145,7 +147,8 @@ def update_service(service_id: str, body: dict) -> dict:
             if entry['id'] == service_id:
                 entry.update({'description': description, 'category': category, 'scope': scope, 'unit': unit,
                               'host_id': host_id, 'service_type': kind, 'port': port,
-                              'web': bool(url) or (kind == 'local' and category == 'Websites'), 'open_url': url})
+                              'web': bool(url) or (kind == 'local' and category == 'Websites'), 'open_url': url,
+                              'website_check': body['website_check']})
                 write('registered-services.json', records)
                 return entry
         raise ValueError('Registered service not found.')
@@ -170,7 +173,7 @@ def add_service(body: dict) -> dict:
                 raise ValueError('This unit and scope are already registered on this host.')
         entry = {'id': 'svc-' + uuid.uuid4().hex, 'name': name, 'description': body.get('description', '').strip()[:240],
                  'category': body.get('category', 'Other'), 'scope': scope, 'unit': unit, 'host_id': host_id,
-                 'service_type': kind, 'port': port, 'web': bool(url) or (kind == 'local' and body.get('category') == 'Websites'), 'open_url': url, 'favorite': False}
+                 'service_type': kind, 'port': port, 'web': bool(url) or (kind == 'local' and body.get('category') == 'Websites'), 'open_url': url, 'favorite': False, 'website_check': body['website_check']}
         if entry['category'] not in {'Websites', 'Tools', 'Automation', 'Gateways', 'Monitoring', 'Network', 'Remote Access', 'Management', 'Other'}:
             raise ValueError('Invalid category.')
         records.append(entry)

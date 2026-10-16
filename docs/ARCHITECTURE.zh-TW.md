@@ -100,3 +100,9 @@ Services 的 JSON 匯出／匯入使用 `app/config_transfer.py`。輸出是可�
 舊 `#links` 書籤導向 Add service，書籤 API 與頁面已移除。URL 在 Services 詳情的設定視窗修改。Add service 不保存 localStorage 草稿，也沒有清空或草稿匯出按鈕；正式匯出由 Services 頁的 Export JSON 提供。完整設置與限制見 [SSH 主機管理](SSH_HOSTS.zh-TW.md)。
 
 `app/static/tracking.js` 管理使用者啟動的限時五秒查詢與瀏覽器到期時間；透過 app.js 的 trackingCheck 更新既有 inventory 及目前 Log 視窗，不新增後端排程或 API。
+
+## 純網頁在線檢查
+
+`app/website_checks.py` 處理無 systemd unit 服務的可選 `website_check`，設定由 registry 的共用欄位驗證保存，並納入 config_transfer 匯入／匯出。`main._decorate_services()` 先套用實際 Open URL，再以最多四個 worker 進行啟用的 HTTP／TCP 檢查，不持有 storage 鎖等待網路 I/O。清單及單項 `/api/services/{id}/live` 都回傳 `website_result`、Running／Stopped 與 checked_at；Status API 也可單次檢查。HTTP 為無認證 GET、僅讀標頭、不跟隨 redirect、HTTPS 保留憑證驗證；TCP 使用設定或 URL 推導的目標。未設定或 Disabled 不連網，沿用 Linked／Unmanaged。
+
+純網頁服務的 managed／controllable 保持 false；既有 controls／journal API 仍拒絕無 unit 項目。前端 Live 與 Tracking 沿用單項 live API，不新增後端輪詢或排程。結果僅在請求及瀏覽器記憶體中，不寫入業務 JSON。無資料庫或安裝遷移；原 data 與 dashboard.env 不需變動。

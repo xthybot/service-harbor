@@ -22,10 +22,13 @@ journalctl -u host-device-monitor.service -n 50 --no-pager -o cat
 cd "$HOME/host-service-dashboard"
 git status --short --branch
 git fetch origin
-git log --oneline --decorate -5
-# 確認本機修改與遠端差異後，再依工作流程更新 main。
+git log --oneline --decorate HEAD..origin/main
+# 確認位於 main，且已保存本地程式修改後：
+git pull --ff-only origin main
 systemctl --user restart host-service-dashboard.service
 ```
+
+此次純網頁在線檢查更新不需要跑 setup／reset、不新增依賴，也不搬移或改寫既有資料。先私密備份目前 DATA_DIR 與設定檔（見下方備份說明），不要把備份加入 Git。`git pull --ff-only` 更新原始碼，保留 gitignored 的 `data/`、SSH key、`.venv` 和 repository 外的 `dashboard.env`；system 模式改用 `sudo systemctl restart host-service-dashboard.service`。如果有本地提交或衝突導致快轉失敗，先停止更新並人工合併；不要使用 `git reset --hard` 或 `git clean`。若曾把私密資料誤加入追蹤，先私密備份並核對追蹤狀態，再處理更新，不能保證被 Git 追蹤的自訂內容不發生衝突。
 
 有未提交變更時先檢查並保存，避免覆蓋現場修改。若 requirements.txt 改變，再於一般帳號的 `.venv` 安裝依賴；若 unit 或安裝位置改變，使用 `bash scripts/setup.sh` 或 `bash scripts/reset.sh` 由安裝器生成並驗證單元；不可直接安裝含 `@...@` 的範本。監控原始碼或 system unit 改變時，需要：
 

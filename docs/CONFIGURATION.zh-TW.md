@@ -132,3 +132,19 @@ Session 每次從加鎖的儲存層確認，不使用跨請求的失效快取。
 ## 匯入預覽一致性
 
 預覽會傳回 15 分鐘有效的確認憑據，綁定匯入 JSON 與當時的 Hosts、服務、別名、URL、Port、最愛等設定版本。確認覆蓋時必須帶上憑據；最終核對和多檔寫入在同一資料交易內完成。預覽後相關設定變更或憑據過期會回 409，需重新選檔預覽。只匯入新項目仍可選 Skip existing；新主機始終以未信任狀態加入。
+
+## 純網頁服務的 website_check
+
+無 unit 的註冊服務可在新增／編輯頁設定 `website_check`，存於原有 registered-services.json，沿用共用鎖及原子寫入。缺少欄位即 `{"method":"disabled"}`，不需要遷移、重置或重新匯入舊資料。
+
+```json
+{"method": "http"}
+```
+
+HTTP／HTTPS 使用 Open URL；TCP 範例：
+
+```json
+{"method": "tcp", "address": "192.0.2.10", "port": 8443}
+```
+
+TCP address 空字串、port 為 null 時，對應欄位各自取自 Open URL。沒有 Open URL 時 TCP 必須填齊 host 和 port。這些欄位不等同 systemd Service port，不會自動新增 Open ports 紀錄。檢查結果不寫入設定或 Log 檔；最後檢查時間由 API 回傳、畫面顯示。HTTP 2xx／3xx／401／403 為 Running，其他回應與網路錯誤為 Stopped；TCP 以連通為準。連線 socket timeout 為 4 秒，DNS 解析仍依作業系統 resolver。HTTP 不跟隨轉址、不下載 body，HTTPS 驗證系統信任的憑證。檢查由 Dashboard 主機發出，無法使用瀏覽器登入狀態。

@@ -2,7 +2,7 @@
 (() => {
   const form = document.querySelector('#add-service-form');
   const feedback = document.querySelector('#add-form-feedback');
-  const fields = ['host_id', 'display_name', 'category', 'scope', 'description', 'unit', 'port', 'open_url'];
+  const fields = ['host_id', 'display_name', 'category', 'scope', 'description', 'unit', 'port', 'open_url', 'check_method', 'check_address', 'check_port'];
   let hosts = [], registering = false;
   const { api, showToast, refreshAll } = window.HostDashboard;
   const setText = (id, value) => { document.getElementById(id).textContent = value; };
@@ -14,6 +14,7 @@
     result.port = result.port ? Number(result.port) : null;
     if (result.service_type === 'external') { result.scope = ''; result.unit = ''; }
     if (!result.unit) result.port = null;
+    result.website_check = {method: result.unit ? 'disabled' : result.check_method, address: result.check_address, port: result.check_port ? Number(result.check_port) : null};
     return { ...result, favorite: form.elements.favorite.checked };
   }
 
@@ -23,37 +24,41 @@
     const external = draft.service_type === 'external';
     const remote = draft.service_type === 'remote';
     const managed = !external && !!draft.unit;
+    document.getElementById('add-check-row').hidden = managed;
+    ['address', 'port'].forEach(field => { document.getElementById(`add-check-${field}-row`).hidden = managed || draft.check_method !== 'tcp'; });
     const selectedHost = hosts.find(host => host.id === draft.host_id);
     document.getElementById('add-register').disabled = registering || (remote && (!selectedHost || (managed && !selectedHost.trusted)));
     setText('add-preview-host', external ? 'External website' : remote ? selectedHost?.name || 'Select a host' : 'This host');
     ['add-unit-field', 'add-scope-field'].forEach(id => {
       document.getElementById(id).hidden = external;
     });
+    form.elements.check_method.disabled = managed;
+    ['check_address', 'check_port'].forEach(name => { form.elements[name].disabled = managed || draft.check_method !== 'tcp'; });
     form.elements.unit.disabled = external;
     document.getElementById('add-port-field').hidden = external;
     form.elements.port.disabled = !managed;
     form.elements.unit.required = false;
     document.getElementById('add-preview-unit').hidden = !managed;
     form.elements.scope.disabled = external;
-    form.elements.open_url.required = external;
+    form.elements.open_url.required = external || (!managed && draft.check_method === 'http');
     form.elements.unit.setCustomValidity('');
     form.elements.open_url.setCustomValidity('');
     setText('add-url-requirement', external ? '* Required' : 'Optional');
-    setText('add-next-log', managed ? 'View status and live journal logs' : 'Open your configured website in a new tab');
+    setText('add-next-log', managed ? 'View status and live journal logs' : draft.check_method !== 'disabled' ? 'View reachability and last check time' : 'Open your configured website in a new tab');
     setText('add-next-control', managed ? 'Use Start / Stop / Restart controls' : 'Edit its settings in Services');
     document.querySelectorAll('[data-add-local-control]').forEach(item => { item.hidden = !managed; });
     setText('add-preview-name', draft.display_name || 'Your new service');
     setText('add-preview-mark', [...(draft.display_name || 'M')][0].toUpperCase());
     setText('add-preview-description', draft.description || 'Fill in the service details to preview its card.');
     setText('add-preview-category', draft.category);
-    setText('add-preview-scope', external ? 'EXTERNAL LINK' : managed ? `${draft.scope.toUpperCase()} UNIT` : 'UNMANAGED');
+    setText('add-preview-scope', external ? (draft.check_method === 'disabled' ? 'EXTERNAL LINK' : `${draft.check_method.toUpperCase()} CHECK`) : managed ? `${draft.scope.toUpperCase()} UNIT` : 'UNMANAGED');
     setText('add-preview-unit', draft.unit);
     document.getElementById('add-preview-port').hidden = !draft.port;
     setText('add-preview-port', draft.port ? `PORT ${draft.port}` : '');
     setText('add-preview-url', draft.open_url || (!managed ? 'No URL configured' : remote ? 'Set a remote website URL' : draft.port ? `This host:${draft.port}` : 'Set a service port or URL'));
     setText('add-preview-star', draft.favorite ? '★' : '☆');
     document.getElementById('add-preview-star').classList.toggle('is-favorite', draft.favorite);
-    setText('add-scope-note', !managed ? 'Without a systemd unit, status monitoring, logs and controls are unavailable.' : draft.scope === 'system'
+    setText('add-scope-note', !managed ? 'Website checks run from this Dashboard host. No journal or Start / Stop / Restart controls.' : draft.scope === 'system'
       ? 'System controls require exact sudo permissions configured by an administrator.'
       : remote ? 'Remote user services run under the SSH account. Journal access and controls use noninteractive SSH commands.' : 'Local user services run under the dashboard account.');
   }
@@ -108,7 +113,7 @@
       remoteGroup.append(empty);
     }
     hosts.forEach(host => remoteGroup.append(new Option(`${host.name} · ${host.username}@${host.address}${host.trusted ? '' : ' · verify fingerprint first'}`, host.id)));
-    select.replaceChildren(new Option('This host', 'local'), remoteGroup, new Option('External website · link only', 'external'));
+    select.replaceChildren(new Option('This host', 'local'), remoteGroup, new Option('External website', 'external'));
     if (previous === 'external' || hosts.some(host => host.id === previous)) select.value = previous;
     render();
   });

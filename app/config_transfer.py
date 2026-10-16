@@ -95,6 +95,7 @@ def export_config(selection: str = 'all', value: str = '') -> dict:
             'port': ports.get(entry['id'], entry.get('port')),
             'open_url': urls.get(entry['id'], entry.get('open_url', '')),
             'favorite': entry['id'] in favorites,
+            'website_check': entry.get('website_check', {'method': 'disabled'}),
         }
         try:
             _normalized_service(record, len(services) + 1)
@@ -157,11 +158,12 @@ def _normalized_service(raw: dict, index: int) -> dict:
         })
     elif raw.get('host') is not None:
         raise ValueError(f'Service {index}: only remote services may include a host.')
-    registry.normalize_service_fields({'display_name': name, 'description': description, 'category': category,
+    normalized = registry.normalize_service_fields({'website_check': raw.get('website_check'), 'display_name': name, 'description': description, 'category': category,
                                        'service_type': kind, 'scope': scope, 'unit': unit, 'open_url': url, 'port': port})
     return {'source_id': source_id, 'service_type': kind, 'host': host, 'unit': unit,
             'scope': scope, 'display_name': name, 'description': description,
-            'category': category, 'port': port, 'open_url': url, 'favorite': favorite}
+            'category': category, 'port': port, 'open_url': url, 'favorite': favorite,
+            'website_check': normalized['website_check']}
 
 
 def _identity(entry: dict) -> tuple:
@@ -237,7 +239,7 @@ def import_config(document: dict, overwrite: bool = False, dry_run: bool = False
                           'scope': item['scope'], 'unit': item['unit'], 'host_id': host_id,
                           'service_type': kind, 'port': item['port'],
                           'web': bool(item['open_url']) or (kind == 'local' and item['category'] == 'Websites'),
-                          'open_url': item['open_url'], 'favorite': False}
+                          'open_url': item['open_url'], 'favorite': False, 'website_check': item['website_check']}
                 if source_id:
                     target['import_source_id'] = source_id
                 registered.append(target)
@@ -250,6 +252,7 @@ def import_config(document: dict, overwrite: bool = False, dry_run: bool = False
                     continue
                 updated += 1
                 if target['id'].startswith('svc-'):
+                    target['website_check'] = item['website_check']
                     target['description'] = item['description']
                     target['category'] = item['category']
                     target['web'] = bool(item['open_url']) or (kind == 'local' and item['category'] == 'Websites')

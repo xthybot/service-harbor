@@ -54,3 +54,11 @@
 - `python3 -m py_compile app/ssh_hosts.py tests/test_ssh_host_consistency.py tests/test_lifecycle.py`、`node --check app/static/hosts.js` 及 `git diff --check` 均通過。
 
 未實機驗證：正式 Dashboard 的主機編輯／刪除、真實檔案權限故障與突然斷電後的使用者操作。更新執行中的後端需另行部署及重啟；此次未部署或推送。
+
+## 2026-10-17：純網頁在線檢查
+
+公開原始碼新增可選 Disabled／HTTP／TCP 檢查；設定保存在原有 registered-services.json，透過既有共用鎖與多檔交易保存。沒有批次改寫或遷移舊資料，舊服務與舊匯入 JSON 未帶 website_check 時維持 Disabled。HTTP 不使用瀏覽器 cookie、不讀 body、不跟隨 redirect，HTTPS 使用系統憑證驗證；無 unit 項目的控制與 journal 仍不可用。
+
+此次執行 app 全部 Python 檔案 compile 語法檢查、app.js／add-service.js 的 node --check 及 git diff --check，均通過。唯讀核對 git ls-files：data、.venv、.env 沒有受追蹤檔案。此次沒有新增或執行功能測試，尚未驗證瀏覽器互動、HTTP／HTTPS／TCP 實際連線及既有安裝更新流程；不得引用前面歷史測試數量作為本功能的驗收結果。沒有操作私人版本、正式設定、SSH key 或執行中的服務。
+
+既有使用者應於原目錄先私密備份，再 git pull --ff-only、依安裝模式重啟 Dashboard；不使用 clone 覆蓋、reset 或 uninstall。完整指令與衝突處理見 OPERATIONS.zh-TW.md。

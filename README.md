@@ -24,7 +24,17 @@
 | Hosts | 註冊 SSH 主機、取得 Dashboard 公鑰、核對主機指紋、檢查連線。 |
 | Add service | 註冊本機／遠端現有 unit 或外部網站連結，並匯入服務設定 JSON。 |
 
-Services 卡片可直接開啟詳情。只有已設定 systemd unit 的服務才有狀態、控制與 journal；User scope 使用該帳號的 user manager，System scope 的控制需要針對確切 unit 與動作授權。啟停／重啟前有確認視窗，結果以提示訊息顯示。Log 支援最近紀錄、SSE 即時追蹤、關鍵字與嚴重程度篩選，以及複製最近 5／10／20 行。頂端 **Not live／Live** 控制服務狀態與 Port 的選取輪詢；即使是 Not live，開啟服務詳情後的 Log 仍會即時追蹤，可用 Log 的 **Pause** 暫停。
+Services 卡片可直接開啟詳情。已設定 systemd unit 的服務提供 systemd 狀態、控制與 journal；純網頁服務可另外啟用下述在線檢查；User scope 使用該帳號的 user manager，System scope 的控制需要針對確切 unit 與動作授權。啟停／重啟前有確認視窗，結果以提示訊息顯示。Log 支援最近紀錄、SSE 即時追蹤、關鍵字與嚴重程度篩選，以及複製最近 5／10／20 行。頂端 **Not live／Live** 控制服務狀態與 Port 的選取輪詢；即使是 Not live，開啟服務詳情後的 Log 仍會即時追蹤，可用 Log 的 **Pause** 暫停。
+
+### 純網頁服務在線檢查
+
+新增或編輯沒有 systemd unit 的服務時，可設定 **Check method**：
+
+- **Disabled**：僅提供 Open；既有服務預設維持此行為，不會因更新而自動發出網路請求。
+- **HTTP / HTTPS**：從 Dashboard 主機對 Open URL 發出 GET，只讀回應標頭；2xx／3xx／401／403 顯示 Running，其他回應、連線失敗、憑證錯誤或逾時顯示 Stopped。不自動跟隨轉址，不傳登入 cookie，也不略過 HTTPS 憑證驗證。
+- **TCP**：嘗試連線至自訂 TCP host／port；留空的欄位取自 Open URL（HTTP 預設 80、HTTPS 預設 443）。連通顯示 Running，失敗顯示 Stopped；不代表網頁功能正常。
+
+卡片及詳情顯示最後檢查時間；詳情 Status 顯示方法、目標、HTTP 狀態碼或失敗原因。檢查沿用單次更新、Live 三秒與鈴鐺五秒追蹤，沒有後端常駐排程。這些服務仍不提供 Start／Stop／Restart 或 journal。設定隨 JSON 匯出／匯入；舊 JSON 缺少欄位時視為 Disabled。
 
 Open ports 對已記錄的目標從 **Dashboard 主機** 嘗試 TCP 連線；Open 只代表該位址與 Port 可連通，不代表 HTTP 健康或 systemd unit 正常。手動 Port 可在此新增、修改與刪除。來自 Services 的 Port 在此只顯示唯讀詳情，右上角 **View service** 會開啟對應的服務詳情；修改或移除其 Port 請到 Services。Port 數字由設定提供，系統不使用 `ss` 掃描主機或執行遠端 Port 查詢。
 
@@ -49,6 +59,10 @@ bash scripts/setup.sh       # Python venv／pip 版本
 公開分享 repository 為 `service-harbor`；亦可使用 HTTPS clone，無需私人 repository 存取權。缺少 Python／venv／pip 時會提示 `sudo apt update` 與 `sudo apt install python3 python3-pip python3-venv`，不自動安裝 apt 套件；詳細需求、權限、模式切換及防火牆請見 [安裝說明](docs/INSTALLATION.zh-TW.md)。
 
 uv 版本使用 `uv venv` 與 `uv pip`，不需要 python3-pip／python3-venv，但仍需要 Python 3 執行安裝器。兩個入口共用安裝流程，重置會沿用上次成功安裝的工具；詳見 [兩種安裝方式](docs/INSTALLATION.zh-TW.md)。
+
+### 既有安裝更新
+
+已安裝者請在原目錄更新，**不要重新 clone 覆蓋原目錄，也不要執行 reset／uninstall**。此次功能不變更依賴或 systemd 設定；只需更新程式並重啟 Dashboard。`data/`、密碼、Hosts 和 SSH key 維持原位，操作步驟及有本地修改時的處理方式見 [維運更新說明](docs/OPERATIONS.zh-TW.md#更新與推送)。
 
 ### 重置與移除
 

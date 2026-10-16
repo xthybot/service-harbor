@@ -10,11 +10,11 @@
   <script src="/static/input-limits.js?v=lifecycle-3" defer></script>
   <script src="/static/async-state.js?v=lifecycle-3" defer></script>
   <script src="/static/modal-state.js?v=lifecycle-3" defer></script>
-  <script src="/static/app.js?v=lifecycle-3" defer></script>
+  <script src="/static/app.js?v=website-checks-1" defer></script>
   <script src="/static/tracking.js?v=lifecycle-3" defer></script>
   <script src="/static/overview.js?v=lifecycle-3" defer></script>
   <script src="/static/hosts.js?v=ssh-pin-consistency-1" defer></script>
-  <script src="/static/add-service.js?v=lifecycle-3" defer></script>
+  <script src="/static/add-service.js?v=website-checks-1" defer></script>
   <script src="/static/config-transfer.js?v=lifecycle-3" defer></script>
   <script src="/static/manual-ports.js?v=lifecycle-3" defer></script>
 </head>
@@ -130,7 +130,7 @@
           <form id="add-service-form" class="add-form-card">
             <div class="add-section-heading"><div><h2>Service settings</h2></div></div>
             <div class="service-form-rows">
-              <div class="service-form-row"><label for="add-host">Host <b>*</b></label><div class="service-field-control"><select id="add-host" name="host_id" required><option value="local">This host</option><option value="external">External website · link only</option></select><a href="#hosts" class="text-link">Add or manage remote hosts →</a></div></div>
+              <div class="service-form-row"><label for="add-host">Host <b>*</b></label><div class="service-field-control"><select id="add-host" name="host_id" required><option value="local">This host</option><option value="external">External website</option></select><a href="#hosts" class="text-link">Add or manage remote hosts →</a></div></div>
               <div class="service-form-row"><label for="add-display-name">Display name <b>*</b></label><div class="service-field-control"><input id="add-display-name" name="display_name" maxlength="80" placeholder="e.g. My project website" required></div></div>
               <div class="service-form-row"><label for="add-category">Category</label><div class="service-field-control"><select id="add-category" name="category"><option>Websites</option><option>Tools</option><option>Automation</option><option>Gateways</option><option>Monitoring</option><option>Network</option><option>Remote Access</option><option>Management</option><option>Other</option></select></div></div>
               <div id="add-scope-field" class="service-form-row"><label for="add-scope">Service scope</label><div class="service-field-control"><select id="add-scope" name="scope"><option value="user">User · current account</option><option value="system">System · host-wide</option></select></div></div>
@@ -138,6 +138,9 @@
               <div id="add-port-field" class="service-form-row"><label for="add-port">Service port <em>Optional</em></label><div class="service-field-control"><input id="add-port" name="port" type="number" min="1" max="65535" inputmode="numeric" placeholder="e.g. 8765"></div></div>
               <div id="add-unit-field" class="service-form-row"><label for="add-unit">systemd unit <em>Optional</em></label><div class="service-field-control"><input id="add-unit" name="unit" maxlength="200" placeholder="my-project.service" title="Enter a systemd unit ending in .service or .socket"></div></div>
               <div class="service-form-row"><label for="add-open-url">Open URL <em id="add-url-requirement">Optional</em></label><div class="service-field-control"><input id="add-open-url" name="open_url" type="url" maxlength="2048" placeholder="https://project.example.com"></div></div>
+              <div id="add-check-row" class="service-form-row"><label for="add-check-method">Check method</label><div class="service-field-control"><select id="add-check-method" name="check_method"><option value="disabled">Disabled · Open only</option><option value="http">HTTP / HTTPS · URL response</option><option value="tcp">TCP · Port connection</option></select></div></div>
+              <div id="add-check-address-row" class="service-form-row" hidden><label for="add-check-address">TCP host</label><div class="service-field-control"><input id="add-check-address" name="check_address" maxlength="253" placeholder="Use Open URL host when blank"></div></div>
+              <div id="add-check-port-row" class="service-form-row" hidden><label for="add-check-port">TCP port</label><div class="service-field-control"><input id="add-check-port" name="check_port" type="number" min="1" max="65535" placeholder="Use Open URL port when blank"></div></div>
               <div class="service-form-row"><label for="add-favorite">Favorites</label><div class="service-field-control"><label class="add-favorite"><input id="add-favorite" name="favorite" type="checkbox"><span>☆ Add to favorites</span></label></div></div>
             </div>
             <p id="add-form-feedback" class="add-feedback" role="status" aria-live="polite"></p>
@@ -255,7 +258,10 @@
           <div id="service-port-row" class="service-form-row"><label for="service-port">Service port</label><div class="service-field-control"><input id="service-port" type="number" min="1" max="65535" inputmode="numeric" placeholder="e.g. 8765"></div></div>
           <div id="service-unit-row" class="service-form-row"><label for="service-unit">systemd unit</label><div class="service-field-control"><input id="service-unit" maxlength="200" placeholder="my-project.service"></div></div>
           <div class="service-form-row"><label for="service-open-url">Open URL</label><div class="service-field-control"><input id="service-open-url" type="url" maxlength="2048" autocomplete="url" placeholder="https://service.example.com"></div></div>
-          <div class="service-form-row"><label for="service-favorite">Favorites</label><div class="service-field-control"><label class="add-favorite"><input id="service-favorite" type="checkbox"><span>☆ Add to favorites</span></label></div></div>
+          <div id="service-check-row" class="service-form-row"><label for="service-check-method">Check method</label><div class="service-field-control"><select id="service-check-method"><option value="disabled">Disabled · Open only</option><option value="http">HTTP / HTTPS · URL response</option><option value="tcp">TCP · Port connection</option></select></div></div>
+              <div id="service-check-address-row" class="service-form-row" hidden><label for="service-check-address">TCP host</label><div class="service-field-control"><input id="service-check-address" maxlength="253" placeholder="Use Open URL host when blank"></div></div>
+              <div id="service-check-port-row" class="service-form-row" hidden><label for="service-check-port">TCP port</label><div class="service-field-control"><input id="service-check-port" type="number" min="1" max="65535" placeholder="Use Open URL port when blank"></div></div>
+              <div class="service-form-row"><label for="service-favorite">Favorites</label><div class="service-field-control"><label class="add-favorite"><input id="service-favorite" type="checkbox"><span>☆ Add to favorites</span></label></div></div>
         </div>
         <p id="service-edit-note" class="service-edit-note"></p>
         <div class="rename-actions port-edit-actions"><button id="service-port-delete" class="button button-danger port-delete-button" type="button" hidden>Remove port</button><button id="service-edit-cancel" class="button button-secondary" type="button">Cancel</button><button class="button button-primary" type="submit">Save settings</button></div>

@@ -320,7 +320,7 @@
 
   function statusClass(status) { return status === "Running" ? "status-running" : status === "Failed" ? "status-failed" : status === "Unavailable" ? "status-unavailable" : status === "Linked" ? "status-linked" : "status-stopped"; }
   function isManaged(service) { return service.managed !== false; }
-  function scopeLabel(service) { return service.scope === "external" ? "EXTERNAL LINK" : !isManaged(service) ? "UNMANAGED" : `${service.scope.toUpperCase()} UNIT`; }
+  function scopeLabel(service) { return service.scope === "external" ? (service.website_check?.method && service.website_check.method !== "disabled" ? `${service.website_check.method.toUpperCase()} CHECK` : "EXTERNAL LINK") : !isManaged(service) ? "UNMANAGED" : `${service.scope.toUpperCase()} UNIT`; }
   function canOpen(service) { return !isManaged(service) || service.status === "Running" || service.service_type === "external" || service.service_type === "remote"; }
 
   function populateHostFilter() {
@@ -353,6 +353,15 @@
     return service.web && service.service_type !== "remote" && service.configured_port ? localServiceUrl(service.configured_port) : "";
   }
 
+  function websiteDetails(service) {
+    const result = service.website_result;
+    if (!result) return "Website checks disabled.";
+    return [`Check: ${result.method.toUpperCase()}`, `Target: ${result.target || "Unavailable"}`,
+      `Status: ${result.status}`, `Last checked: ${new Date(result.checked_at).toLocaleString()}`,
+      result.http_status ? `HTTP status: ${result.http_status}` : "", result.error ? `Reason: ${result.error}` : "",
+      "Checked from the Dashboard host. Journal and controls are unavailable."].filter(Boolean).join("\n");
+  }
+
   function renderDrawerActions(service) {
     const openUrl = getOpenUrl(service);
     const unavailable = service.controllable === false || state.busy.has(service.id);
@@ -361,7 +370,7 @@
     $('#drawer-remove').hidden = !service.registered;
     $('#log-pause').disabled = !isManaged(service);
     $('.drawer-tab[data-tab=logs]').hidden = !isManaged(service);
-    $('.drawer-tab[data-tab=status]').textContent = isManaged(service) ? 'Status' : 'Details';
+    $('.drawer-tab[data-tab=status]').textContent = isManaged(service) || service.website_check?.method && service.website_check.method !== 'disabled' ? 'Status' : 'Details';
     $('#log-refresh').disabled = !isManaged(service);
   }
 
@@ -377,7 +386,7 @@
     return `<article class="service-card${state.selection?.kind === "service" && state.selection.id === service.id ? " is-selected" : ""}" data-service-id="${esc(service.id)}" tabindex="0" aria-label="Open details for ${esc(displayName(service))}">
       <div class="service-card-top"><div class="service-identity"><span class="service-mark ${service.scope === "system" ? "mark-system" : service.web ? "mark-web" : ""}">${esc(serviceInitial(service))}</span><div class="service-copy"><div class="service-title-line"><h3 data-open-detail="${esc(service.id)}" title="View service details">${esc(displayName(service))}</h3></div><p>${esc(service.description)}</p></div></div><div class="service-status-group"><span class="service-status-light ${statusClass(service.status)}" role="img" tabindex="0" aria-label="Status: ${esc(service.status)}" data-status="${esc(service.status)}"></span><button class="favorite-indicator${service.favorite ? " is-favorite" : ""}" type="button" data-toggle-favorite="${esc(service.id)}" aria-label="${service.favorite ? "Remove from favorites" : "Add to favorites"}" aria-pressed="${String(!!service.favorite)}" title="${service.favorite ? "Remove from favorites" : "Add to favorites"}" ${state.favoriteBusy.has(service.id) ? "disabled" : ""}>${service.favorite ? "★" : "☆"}</button></div></div>
       <div class="service-tags">${tags}</div>
-      <span class="started-at service-card-time">${service.status === "Running" ? `Active since <strong>${esc(activeTime)}</strong>` : !isManaged(service) ? (openUrl ? "Website shortcut" : "No systemd unit configured") : service.status === "Unavailable" ? `<span title="${esc(service.error)}">Host or unit unavailable</span>` : `Unit <strong>${service.substate === "failed" ? "failed" : "inactive"}</strong>`}</span>
+      <span class="started-at service-card-time">${!isManaged(service) && service.website_result ? `Last checked <strong>${esc(formatTime(service.checked_at))}</strong>` : service.status === "Running" ? `Active since <strong>${esc(activeTime)}</strong>` : !isManaged(service) ? (openUrl ? "Website shortcut" : "No systemd unit configured") : service.status === "Unavailable" ? `<span title="${esc(service.error)}">Host or unit unavailable</span>` : `Unit <strong>${service.substate === "failed" ? "failed" : "inactive"}</strong>`}</span>
       <div class="service-card-bottom"><div class="card-actions">
         ${openUrl && canOpen(service) ? `<a class="mini-action open-action" href="${esc(openUrl)}" target="_blank" rel="noopener noreferrer" title="Open service in a new tab">↗ Open</a>` : (service.web || service.open_url) ? `<button class="mini-action open-action" data-open-service="${esc(service.id)}" disabled title="${service.status !== "Running" ? "Start service to open it" : "No open URL or service port configured"}">↗ Open</button>` : ""}
         ${!isManaged(service) ? "" : `<button class="mini-action" data-action="start" data-id="${esc(service.id)}" ${startDisabled ? "disabled" : ""} title="Start" aria-label="Start ${esc(service.name)}">▶ Start</button><button class="mini-action" data-action="restart" data-id="${esc(service.id)}" ${restartDisabled ? "disabled" : ""} title="Restart" aria-label="Restart ${esc(service.name)}">↻ Restart</button><button class="mini-action" data-action="stop" data-id="${esc(service.id)}" ${stopDisabled ? "disabled" : ""} title="Stop" aria-label="Stop ${esc(service.name)}">■ Stop</button>`}
@@ -496,6 +505,7 @@
     }
     $("#drawer-meta").innerHTML = drawerMeta(service);
     updateDrawerCheckedAt(service);
+    if (!isManaged(service)) $("#status-output").textContent = websiteDetails(service);
     $("#drawer-title").textContent = displayName(service);
     $("#drawer-category").textContent = `${service.category} · ${scopeLabel(service)}`;
     $("#drawer-description").textContent = service.description;
@@ -764,9 +774,16 @@
     $("#service-scope").disabled = !registered || external;
     $("#service-unit").disabled = !registered || external;
     $("#service-port").disabled = external || !$("#service-unit").value.trim();
-    $("#service-open-url").required = external;
+    const managed = !external && !!$("#service-unit").value.trim();
+    $("#service-check-row").hidden = managed;
+    $("#service-check-method").disabled = managed;
+    ["address", "port"].forEach(field => { $(`#service-check-${field}`).disabled = managed || $("#service-check-method").value !== "tcp"; });
+    ["address", "port"].forEach(field => { $(`#service-check-${field}-row`).hidden = managed || $("#service-check-method").value !== "tcp"; });
+    $("#service-open-url").required = external || (!managed && $("#service-check-method").value === "http");
     $("#service-edit-note").textContent = registered ? "Editing these settings does not create, start, or stop a unit." : "Built-in service host, scope, and systemd unit are fixed.";
   }
+
+  $("#service-check-method").addEventListener("change", updateEditorLocation);
 
   async function askRename(serviceId) {
     const service = state.services.find(item => item.id === serviceId);
@@ -779,7 +796,7 @@
       const remote = document.createElement("optgroup");
       remote.label = "Remote SSH hosts";
       (result.hosts || []).forEach(item => remote.append(new Option(`${item.name} · ${item.username}@${item.address}`, item.id)));
-      host.replaceChildren(new Option("This host", "local"), remote, new Option("External website · link only", "external"));
+      host.replaceChildren(new Option("This host", "local"), remote, new Option("External website", "external"));
       state.renameTarget = serviceId;
       window.HostTracking?.bind($("#rename-cancel"), "service", serviceId);
       host.value = service.service_type === "external" ? "external" : service.host_id || "local";
@@ -791,6 +808,9 @@
       $("#service-unit").value = service.unit || "";
       $("#service-open-url").value = service.open_url || "";
       $("#service-open-url").placeholder = getOpenUrl(service) || "https://service.example.com";
+      $("#service-check-method").value = service.website_check?.method || "disabled";
+      $("#service-check-address").value = service.website_check?.address || "";
+      $("#service-check-port").value = service.website_check?.port || "";
       $("#service-favorite").checked = !!service.favorite;
       $("#service-port-delete").hidden = !service.configured_port;
       updateEditorLocation();
@@ -826,6 +846,8 @@
       scope: serviceType === "external" ? "external" : $("#service-scope").value,
       description: $("#service-description").value.trim(), unit,
       port: unit && $("#service-port").value ? Number($("#service-port").value) : null,
+      website_check: {method: unit ? "disabled" : $("#service-check-method").value,
+        address: $("#service-check-address").value.trim(), port: $("#service-check-port").value ? Number($("#service-check-port").value) : null},
       open_url: $("#service-open-url").value.trim(), favorite: $("#service-favorite").checked
     };
     try {

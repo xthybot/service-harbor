@@ -65,6 +65,7 @@ class AddServiceBody(BaseModel):
     open_url: str = Field(default='', max_length=2048)
     port: int | None = Field(default=None, ge=1, le=65535)
     favorite: bool = False
+    website_check: dict | None = None
 
 class ManualPortBody(BaseModel):
     name: str = Field(max_length=80)
@@ -132,6 +133,15 @@ def _decorate_services(rows: list[dict]) -> list[dict]:
         service["open_url"] = open_urls.get(service["id"], service.get("open_url", ""))
         if not service["managed"]:
             service["status"] = "Linked" if service["open_url"] else "Unmanaged"
+    from . import website_checks
+    from concurrent.futures import ThreadPoolExecutor
+    candidates = [row for row in rows if not row['managed'] and row.get('website_check', {}).get('method', 'disabled') != 'disabled']
+    def probe(row):
+        result = website_checks.check(row['website_check'], row['open_url'])
+        row.update(status=result['status'], checked_at=result['checked_at'], error=result['error'], website_result=result)
+    if candidates:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(executor.map(probe, candidates))
     return rows
 
 

@@ -170,7 +170,9 @@ def get_status(service_id: str) -> str:
         raise ValueError('Unknown service')
     service = SERVICE_BY_ID[service_id]
     if not is_managed(service):
-        return f"Service: {service['name']}\nLocation: {service.get('service_type', 'local')}\nSystemd unit: Not configured\nStatus monitoring, journal logs and controls are unavailable."
+        from . import website_checks, service_urls
+        url = service_urls.get_urls().get(service_id, service.get('open_url', ''))
+        return website_checks.details(website_checks.check(service.get('website_check', {}), url))
     identity = journal_identity(service_id)
     result = _execute(service, _systemctl(service_id, 'status', '--no-pager', '-n', '35'))
     if not _identity_matches(service_id, identity):
