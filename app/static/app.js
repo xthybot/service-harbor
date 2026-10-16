@@ -588,6 +588,13 @@
   }
 
   async function loadStatus(serviceId) {
+    const service = state.services.find(item => item.id === serviceId);
+    if (service && !isManaged(service)) {
+      // The selected /live check owns the reachability result. A second status
+      // request would probe twice and could overwrite a newer Live snapshot.
+      if (state.selected === serviceId) $("#status-output").textContent = websiteDetails(service);
+      return;
+    }
     const token = drawerLife.capture(serviceId);
     $("#status-output").textContent = "Loading status…";
     try {
@@ -816,7 +823,8 @@
       updateEditorLocation();
       $("#rename-modal").hidden = false;
       resizeTextareas();
-      setTimeout(() => { $("#service-display-name").focus(); $("#service-display-name").select(); }, 30);
+      $("#service-display-name").focus();
+      $("#service-display-name").select();
     } catch (error) { showToast(error.message, "error"); }
   }
 

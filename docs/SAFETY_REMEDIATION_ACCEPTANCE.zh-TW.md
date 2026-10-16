@@ -62,3 +62,7 @@
 此次執行 app 全部 Python 檔案 compile 語法檢查、app.js／add-service.js 的 node --check 及 git diff --check，均通過。唯讀核對 git ls-files：data、.venv、.env 沒有受追蹤檔案。此次沒有新增或執行功能測試，尚未驗證瀏覽器互動、HTTP／HTTPS／TCP 實際連線及既有安裝更新流程；不得引用前面歷史測試數量作為本功能的驗收結果。沒有操作私人版本、正式設定、SSH key 或執行中的服務。
 
 既有使用者應於原目錄先私密備份，再 git pull --ff-only、依安裝模式重啟 Dashboard；不使用 clone 覆蓋、reset 或 uninstall。完整指令與衝突處理見 OPERATIONS.zh-TW.md。
+
+### 2026-10-17：後續實測
+
+在隔離 loopback HTTP／HTTPS／TCP 端點、真實 Uvicorn HTTP API 和 Chrome 完成測試，並新增可重跑驗證。原先僅完成語法檢查的限制已由此次覆蓋；完整範圍、實測中修正、重跑方式與剩餘限制見 [純網頁在線檢查實測](WEBSITE_CHECK_ACCEPTANCE.zh-TW.md)。正式版本仍未部署，未操作正式服務。

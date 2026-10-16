@@ -28,7 +28,7 @@ test('login 401 retains server detail; SSE session checks deduplicate, back off 
 });
 
 function harness() {
-  const nodes=new Map(),requests=[],events=[],sources=[];
+  const nodes=new Map(),requests=[],events=[],sources=[],timers=[];
   class Node {
     constructor(id=''){this.id=id;this.hidden=false;this.open=false;this.value=/filter|severity/.test(id)?'all':'';this.dataset={};this.style={};this.listeners={};this.children=[];this.textContent='';this.innerHTML='';this.disabled=false;this.isConnected=true;this.classList={set:new Set(),add(...xs){xs.forEach(x=>this.set.add(x));},remove(...xs){xs.forEach(x=>this.set.delete(x));},contains(x){return this.set.has(x);},toggle(x,on){if(on===undefined)on=!this.set.has(x);if(on)this.set.add(x);else this.set.delete(x);}};}
     addEventListener(type,fn){(this.listeners[type]??=[]).push(fn);}
@@ -40,13 +40,13 @@ function harness() {
   const document={activeElement:null,body:new Node('body'),querySelector:selector=>node(selector.replace(/^#/,'')),getElementById:node,querySelectorAll:()=>[],createElement:()=>new Node(),addEventListener(){}};
   const window={HostAsync:{AuthLifecycle,Lifetime},addEventListener(){},dispatchEvent:e=>events.push(e)};
   class Source {constructor(url){this.url=url;this.listeners={};sources.push(this);}close(){this.closed=true;}addEventListener(type,fn){this.listeners[type]=fn;}}
-  const context={window,document,fetch:(url,options)=>{const d=deferred();requests.push({url,options,...d});return d.promise;},EventSource:Source,Event:class{constructor(type){this.type=type;}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},URL,URLSearchParams,Intl,Date,Option:Node,AbortController,location:{hostname:'example.invalid',origin:'http://example.invalid',hash:'#services',port:'8765',protocol:'http:'},navigator:{},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){},requestAnimationFrame:()=>{},console};
+  const context={window,document,fetch:(url,options)=>{const d=deferred();requests.push({url,options,...d});return d.promise;},EventSource:Source,Event:class{constructor(type){this.type=type;}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},URL,URLSearchParams,Intl,Date,Option:Node,AbortController,location:{hostname:'example.invalid',origin:'http://example.invalid',hash:'#services',port:'8765',protocol:'http:'},navigator:{},setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},requestAnimationFrame:()=>{},console};
   // Export closure internals only inside this VM; production source is unchanged.
   const code=fs.readFileSync(require.resolve('../app/static/app.js'),'utf8').replace('  init();','  window.__test = {state,auth,showLogin,openServiceDetail,closeDrawer,loadStatus,loadRecentLogs,startLogStream,toggleServiceFavorite,renderPorts,updateDrawerSummary,logout,bindEvents,refreshAll,trackingCheck};');
   vm.runInNewContext(code,context);const api=window.__test;api.auth.advance(true);api.bindEvents();
   const answer=(url,payload,status=200)=>{const r=requests.find(r=>!r.done&&r.url===url);assert.ok(r,`missing request ${url}`);r.done=true;r.resolve(response(payload,status));return r;};
   const service=id=>({id,name:id,display_name:id,description:'demo',category:'Tools',scope:'user',unit:id+'.service',managed:true,status:'Running',host_id:'local'});
-  api.state.services=[service('A'),service('B')];return {api,node,nodes,requests,answer,sources,events,service,document,window,context};
+  api.state.services=[service('A'),service('B')];return {api,node,nodes,requests,answer,sources,events,service,document,window,context,timers};
 }
 
 test('actual drawer: A→B and same-service reopening reject late status/recent successes and errors',async()=>{
@@ -217,4 +217,29 @@ test('Hosts refreshes revoked trust after a failed fingerprint replacement',asyn
   h.answer('/api/hosts',{hosts:[{...host,trusted:false,connection:'Unchecked',last_error:'Retry Trust host'}]});
   h.answer('/api/ssh-key',{public_key:'',fingerprint:''});await trust;
   assert.match(h.node('hosts-grid').innerHTML,/Retry Trust host/);
+});
+
+test('website drawer reuses live snapshot without duplicate status probes or stale results',async()=>{
+  const h=harness();
+  const website={...h.service('A'),scope:'external',unit:'',managed:false,website_check:{method:'http'},
+    website_result:{method:'http',target:'https://example.invalid',status:'Running',http_status:200,checked_at:'2026-10-17T00:00:00Z',error:''}};
+  h.api.state.services=[website];
+  h.api.openServiceDetail('A');
+  assert.equal(h.requests.filter(r=>/\/status$|\/logs\?/.test(r.url)).length,0);
+  assert.match(h.node('status-output').textContent,/HTTP status: 200/);
+  h.api.state.services[0]={...website,status:'Stopped',website_result:{...website.website_result,status:'Stopped',http_status:503,error:'HTTP 503'}};
+  h.api.updateDrawerSummary();
+  assert.match(h.node('status-output').textContent,/HTTP status: 503/);
+  assert.equal(h.sources.length,0);
+});
+
+
+test('service editor focuses immediately and does not steal focus from URL input later',async()=>{
+  const h=harness();h.api.state.selected='A';
+  const opening=h.node('drawer-rename').emit('click');
+  h.answer('/api/hosts',{hosts:[]});await opening;
+  assert.equal(h.document.activeElement,h.node('service-display-name'));
+  h.node('service-open-url').focus();
+  for(const timer of h.timers.filter(timer=>timer.delay===30))timer.fn();
+  assert.equal(h.document.activeElement,h.node('service-open-url'));
 });

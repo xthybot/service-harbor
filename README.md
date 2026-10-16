@@ -34,7 +34,7 @@ Services 卡片可直接開啟詳情。已設定 systemd unit 的服務提供 sy
 - **HTTP / HTTPS**：從 Dashboard 主機對 Open URL 發出 GET，只讀回應標頭；2xx／3xx／401／403 顯示 Running，其他回應、連線失敗、憑證錯誤或逾時顯示 Stopped。不自動跟隨轉址，不傳登入 cookie，也不略過 HTTPS 憑證驗證。
 - **TCP**：嘗試連線至自訂 TCP host／port；留空的欄位取自 Open URL（HTTP 預設 80、HTTPS 預設 443）。連通顯示 Running，失敗顯示 Stopped；不代表網頁功能正常。
 
-卡片及詳情顯示最後檢查時間；詳情 Status 顯示方法、目標、HTTP 狀態碼或失敗原因。檢查沿用單次更新、Live 三秒與鈴鐺五秒追蹤，沒有後端常駐排程。這些服務仍不提供 Start／Stop／Restart 或 journal。設定隨 JSON 匯出／匯入；舊 JSON 缺少欄位時視為 Disabled。
+卡片及詳情顯示最後檢查時間；詳情 Status 顯示方法、目標、HTTP 狀態碼或失敗原因。檢查沿用單次更新、Live 三秒與鈴鐺五秒追蹤，沒有後端常駐排程。這些服務仍不提供 Start／Stop／Restart 或 journal。設定隨 JSON 匯出／匯入；舊 JSON 缺少欄位時視為 Disabled。實測範圍及重跑方式見 [純網頁檢查驗收](docs/WEBSITE_CHECK_ACCEPTANCE.zh-TW.md)。
 
 Open ports 對已記錄的目標從 **Dashboard 主機** 嘗試 TCP 連線；Open 只代表該位址與 Port 可連通，不代表 HTTP 健康或 systemd unit 正常。手動 Port 可在此新增、修改與刪除。來自 Services 的 Port 在此只顯示唯讀詳情，右上角 **View service** 會開啟對應的服務詳情；修改或移除其 Port 請到 Services。Port 數字由設定提供，系統不使用 `ss` 掃描主機或執行遠端 Port 查詢。
 
