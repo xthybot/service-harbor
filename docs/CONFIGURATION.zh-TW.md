@@ -144,13 +144,13 @@ Session 每次從加鎖的儲存層確認，不使用跨請求的失效快取。
 HTTP／HTTPS 使用 Open URL；TCP 範例：
 
 ```json
-{"method": "tcp", "address": "192.0.2.10", "port": 8443}
+{"method": "tcp"}
 ```
 
-TCP address 空字串、port 為 null 時，對應欄位各自取自 Open URL。沒有 Open URL 時 TCP 必須填齊 host 和 port。這些欄位不等同 systemd Service port，不會自動新增 Open ports 紀錄。檢查結果不寫入設定或 Log 檔；最後檢查時間由 API 回傳、畫面顯示。HTTP 2xx／3xx／401／403 為 Running，其他回應與網路錯誤為 Stopped；TCP 以連通為準。連線 socket timeout 為 4 秒，DNS 解析仍依作業系統 resolver。HTTP 不跟隨轉址、不下載 body，HTTPS 驗證系統信任的憑證。檢查由 Dashboard 主機發出，無法使用瀏覽器登入狀態。
+TCP 主機取自 Open URL 的 hostname，Port 優先使用 Service Port；未設定時使用 URL 指定的 Port，否則依 HTTP／HTTPS 使用 80／443。新增與編輯介面不提供獨立 TCP host／port 欄位，選 TCP 時必須提供 Open URL。執行檢查時重新取目前 URL／Service Port，因此修改後不會沿用舊目標。有 Open URL 的舊設定也使用相同規則；僅有舊獨立 TCP 目標且沒有 URL 的紀錄保留相容讀取，編輯儲存時請補上 URL。檢查結果不寫入設定或 Log 檔；最後檢查時間由 API 回傳、畫面顯示。HTTP 2xx／3xx／401／403 為 Running，其他回應與網路錯誤為 Stopped；TCP 以連通為準。連線 socket timeout 為 4 秒，DNS 解析仍依作業系統 resolver。HTTP 不跟隨轉址、不下載 body，HTTPS 驗證系統信任的憑證。檢查由 Dashboard 主機發出，無法使用瀏覽器登入狀態。
 
 ### systemd 與連通結果分離
 
-Check method 不受有無 unit 限制。API 的 `status`、`checked_at`、`error` 對有 unit 的服務仍代表 systemd 查詢；`website_result` 包含另外的 HTTP／TCP 狀態、原因與 `checked_at`。無 unit 的服務則沿用連通結果作為 status。記錄的 Service port 與 TCP check port 為不同欄位，設定 HTTP check 時即使 Service port 無法直連，也不會額外探測它。
+Check method 不受有無 unit 限制。API 的 `status`、`checked_at`、`error` 對有 unit 的服務仍代表 systemd 查詢；`website_result` 包含另外的 HTTP／TCP 狀態、原因與 `checked_at`。無 unit 的服務則沿用連通結果作為 status。TCP 使用記錄的 Service Port，設定 HTTP check 時即使 Service Port 無法直連，也不會額外探測它。
 
 Services／新增服務頁刷新時，Port inventory API 使用 `probe=false`，只取設定，不發起隱含 TCP 連線；上次已取得且目標未變的 Port 結果在瀏覽器中保留。Overview／Open ports 仍會查 TCP inventory；這些結果不覆蓋 Services 的 systemd 或 Check method 結果。不存在後端常駐輪詢。

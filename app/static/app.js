@@ -815,9 +815,7 @@
     $("#service-port").disabled = external || !$("#service-unit").value.trim();
     $("#service-check-row").hidden = false;
     $("#service-check-method").disabled = false;
-    ["address", "port"].forEach(field => { $(`#service-check-${field}`).disabled = $("#service-check-method").value !== "tcp"; });
-    ["address", "port"].forEach(field => { $(`#service-check-${field}-row`).hidden = $("#service-check-method").value !== "tcp"; });
-    $("#service-open-url").required = external || $("#service-check-method").value === "http";
+    $("#service-open-url").required = external || ["http", "tcp"].includes($("#service-check-method").value);
     $("#service-edit-note").textContent = registered ? "Editing these settings does not create, start, or stop a unit." : "Built-in service host, scope, and systemd unit are fixed.";
   }
 
@@ -847,8 +845,6 @@
       $("#service-open-url").value = service.open_url || "";
       $("#service-open-url").placeholder = getOpenUrl(service) || "https://service.example.com";
       $("#service-check-method").value = service.website_check?.method || "disabled";
-      $("#service-check-address").value = service.website_check?.address || "";
-      $("#service-check-port").value = service.website_check?.port || "";
       $("#service-favorite").checked = !!service.favorite;
       $("#service-port-delete").hidden = !service.configured_port;
       updateEditorLocation();
@@ -885,8 +881,7 @@
       scope: serviceType === "external" ? "external" : $("#service-scope").value,
       description: $("#service-description").value.trim(), unit,
       port: unit && $("#service-port").value ? Number($("#service-port").value) : null,
-      website_check: {method: $("#service-check-method").value,
-        address: $("#service-check-address").value.trim(), port: $("#service-check-port").value ? Number($("#service-check-port").value) : null},
+      website_check: {method: $("#service-check-method").value},
       open_url: $("#service-open-url").value.trim(), favorite: $("#service-favorite").checked
     };
     try {

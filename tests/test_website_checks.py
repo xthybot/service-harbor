@@ -129,7 +129,7 @@ class WebsiteChecks(unittest.TestCase):
                 self.assertEqual(request(f'/api/services/{sid}/logs')[0], 400)
                 for action in ('start', 'stop', 'restart'):
                     self.assertEqual(request(f'/api/services/{sid}/actions/{action}', {}, method='POST')[0], 400)
-                edited = self.body('tcp'); edited['website_check'].update(address='127.0.0.1', port=self.targets.tcp_port)
+                edited = self.body('tcp', open_url=f'http://127.0.0.1:{self.targets.tcp_port}')
                 code, result = request(f'/api/services/{sid}/edit', edited, method='PUT')
                 self.assertEqual(code, 200, result)
                 self.assertEqual(request(f'/api/services/{sid}/live')[1]['service']['status'], 'Running')
@@ -148,7 +148,7 @@ class WebsiteChecks(unittest.TestCase):
         with patch.object(website_checks, 'check', side_effect=AssertionError('Disabled service must not connect')):
             self.assertEqual(main._decorate_services(main.systemd.get_services(entry['id']))[0]['status'], 'Linked')
         self.assertEqual((storage.DATA_DIR / 'registered-services.json').read_bytes(), before)
-        registry.update_service(entry['id'], self.body('tcp', website_check={'method': 'tcp', 'address': '127.0.0.1', 'port': self.targets.tcp_port}))
+        registry.update_service(entry['id'], self.body('tcp', open_url=f'http://127.0.0.1:{self.targets.tcp_port}'))
         document = config_transfer.export_config('service', entry['id'])
         settings = document['services'][0]['website_check']
         self.assertEqual(settings['port'], self.targets.tcp_port)

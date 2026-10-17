@@ -113,7 +113,7 @@ def normalize_service_fields(body: dict) -> dict:
         if port is not None and not unit:
             raise ValueError('A systemd unit is required to assign a service port.')
     from .website_checks import normalize
-    website_check = normalize(body.get('website_check'), managed=bool(unit), url=url)
+    website_check = normalize(body.get('website_check'), managed=bool(unit), url=url, service_port=port)
     return {**body, 'website_check': website_check, 'display_name': name, 'description': description, 'category': category,
             'service_type': kind, 'scope': scope, 'unit': unit, 'host_id': host_id,
             'open_url': url, 'port': port}

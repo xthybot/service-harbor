@@ -77,3 +77,7 @@ uv 安裝模式使用目前 Python 並禁止自動下載 Python，不要求環�
 ### systemd 路徑產生規則
 
 `lifecycle.py` 的 WorkingDirectory／EnvironmentFile 是 scalar 指令，勿對整個值套用 unit_quote。EnvironmentFile 還會在執行時 glob，必須跳脫 glob 字元。ReadWritePaths 是 list，應保留引號與跳脫。ExecStart 第一個執行檔 token 不做 `$` 變數展開，不可將字面 `$` 改成 `$$`；引號與反斜線在執行檔路徑不支援，安裝需提早拒絕。驗證產生的 user/system unit 時，同時要求 systemd-analyze 的退出碼為零且 stderr 無忽略設定警告。上述解析驗證不會實際啟動服務。
+
+### TCP Check method 取值
+
+新增／編輯不提供獨立 TCP host／port。主機取 Open URL hostname，Port 優先用 configured_port，否則 URL port／80／443。API 裝飾、Status 與單項／追蹤查詢須沿用同一規則；舊設定有 URL 時不可再優先用 website_check 的快照。無 URL 的舊獨立 TCP 設定僅保留相容讀取。Services 摘要順序為 Total services、Running、Connectivity issues、Stopped、Failed。

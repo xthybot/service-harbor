@@ -41,7 +41,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await page.locator('#add-display-name').fill('Browser HTTP website');
     await page.locator('#add-open-url').fill(fixture.http+'/dynamic');
     await page.locator('#add-check-method').selectOption('http');
-    assert.equal(await page.locator('#add-check-address-row').isVisible(),false);
+    assert.equal(await page.locator('#add-check-address-row').count(),0);
     await page.screenshot({path:'/tmp/service-harbor-add-website.png',fullPage:true});
     const create = page.waitForResponse(response=>response.url()===fixture.dashboard+'/api/services' && response.request().method()==='POST');
     await page.locator('#add-register').click();
@@ -81,9 +81,8 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       await page.locator('#service-check-method').selectOption(method);
       await page.locator('#service-open-url').fill(url);
       if(method==='tcp') {
-        assert.equal(await page.locator('#service-check-address-row').isVisible(),true);
-        await page.locator('#service-check-address').fill(address);
-        await page.locator('#service-check-port').fill(port);
+        assert.equal(await page.locator('#service-check-address').count(),0);
+        assert.equal(await page.locator('#service-check-port').count(),0);
       }
       const saved = page.waitForResponse(r=>r.url().endsWith(`/api/services/${id}/edit`) && r.request().method()==='PUT');
       await page.locator('#rename-form button[type=submit]').click();
@@ -97,10 +96,10 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
         return method==='disabled' ? text.includes('disabled') : text.includes(`Check: ${method.toUpperCase()}`) && text.includes(`Target: ${target}`);
       },{method,target});
     }
-    await edit('tcp',fixture.http+'/dynamic','127.0.0.1',String(fixture.tcp_port));
+    await edit('tcp',`http://127.0.0.1:${fixture.tcp_port}`,'127.0.0.1',String(fixture.tcp_port));
     await page.waitForFunction(()=>document.querySelector('#status-output').textContent.includes('Check: TCP'));
     assert.match(await page.locator('#status-output').textContent(),/Status: Running/);
-    mark('edit HTTP → explicit TCP, retained name and settings, Running despite HTTP 503');
+    mark('edit HTTP → URL-derived TCP, retained name and settings, Running despite HTTP 503');
     await edit('http',fixture.https+'/status/200');
     await page.waitForFunction(()=>document.querySelector('#status-output').textContent.includes('HTTP status: 200'));
     mark('HTTPS with trusted temporary CA and correct hostname is Running');

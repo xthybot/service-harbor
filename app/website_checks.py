@@ -10,7 +10,7 @@ from .service_url_validation import validate_url
 TIMEOUT = 4
 
 
-def normalize(value, *, managed=False, url=''):
+def normalize(value, *, managed=False, url='', service_port=None):
     # A unit does not disable the independent network check.
     if value is None:
         value = {}
@@ -27,6 +27,14 @@ def normalize(value, *, managed=False, url=''):
         if not url:
             raise ValueError('HTTP / HTTPS checks require an Open URL.')
         return {'method': method}
+    if service_port is not None and (type(service_port) is not int or not 1 <= service_port <= 65535):
+        raise ValueError('Service Port must be between 1 and 65535.')
+    if parsed.hostname:
+        # URL and current Service Port are authoritative, including for old
+        # records that still carry independent TCP address/port overrides.
+        return {'method': method, 'address': parsed.hostname,
+                'port': service_port or parsed.port or (443 if parsed.scheme == 'https' else 80)}
+    # Keep legacy records without a URL readable; new forms require a URL.
     from .manual_ports import _address
     address = value.get('address', '')
     if not isinstance(address, str):
@@ -40,14 +48,14 @@ def normalize(value, *, managed=False, url=''):
     return {'method': method, 'address': address, 'port': port}
 
 
-def check(settings, url):
+def check(settings, url, service_port=None):
     method = settings.get('method', 'disabled')
     if method == 'disabled':
         return None
     result = {'method': method, 'status': 'Stopped', 'error': '', 'http_status': None}
     connection = None
     try:
-        settings = normalize(settings, url=url)
+        settings = normalize(settings, url=url, service_port=service_port)
         parsed = urlsplit(validate_url(url))
         if method == 'http':
             connection_type = http.client.HTTPSConnection if parsed.scheme == 'https' else http.client.HTTPConnection

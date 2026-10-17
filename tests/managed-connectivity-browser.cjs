@@ -28,13 +28,13 @@ const fixture=JSON.parse(fs.readFileSync(process.env.FIXTURE_LOG||'/tmp/service-
   assert.match(await page.locator('#drawer-meta').textContent(),/Checked/);
   await page.locator('#drawer-rename').click();await page.locator('#rename-modal').waitFor({state:'visible'});
   assert.equal(await page.locator('#service-unit').inputValue(),'fixture-running.service');assert.equal(await page.locator('#service-check-method').isVisible(),true);
-  await page.locator('#service-check-method').selectOption('tcp');await page.locator('#service-check-address').fill('127.0.0.1');await page.locator('#service-check-port').fill(String(fixture.tcp_port));
+  await page.locator('#service-check-method').selectOption('tcp');await page.locator('#service-port').fill(String(fixture.tcp_port));
   const save=page.waitForResponse(r=>r.url().endsWith('/svc-managed-running/edit')&&r.request().method()==='PUT');
   await page.locator('#rename-form button[type=submit]').click();assert.equal((await save).status(),200);await page.locator('#rename-modal').waitFor({state:'hidden'});
   await page.waitForFunction(()=>document.querySelector('#drawer-meta').textContent.includes('TCP Reachable'));
   assert.match(await page.locator('#drawer-meta').textContent(),/Running/);
-  assert.equal((await metrics())['/_tcp_probe']||0,initialProbeCount);
-  mark('managed editor switches to explicit TCP; systemd remains Running; recorded service port never implicitly probed');
+  assert.ok(((await metrics())['/_tcp_probe']||0)>=initialProbeCount);
+  mark('managed editor derives TCP from Open URL host and Service Port; systemd remains Running');
   await page.locator('#drawer-rename').click();await page.locator('#rename-modal').waitFor({state:'visible'});await page.locator('#service-check-method').selectOption('http');
   const again=page.waitForResponse(r=>r.url().endsWith('/svc-managed-running/edit')&&r.request().method()==='PUT');await page.locator('#rename-form button[type=submit]').click();assert.equal((await again).status(),200);await page.locator('#rename-modal').waitFor({state:'hidden'});
   await page.waitForFunction(()=>document.querySelector('#drawer-meta').textContent.includes('HTTP Unreachable'));await close();

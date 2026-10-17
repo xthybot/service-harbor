@@ -38,7 +38,7 @@ class ServiceConnectivity(unittest.TestCase):
         document['services'][0]['website_check']={'method':'tcp','address':'localhost','port':443}
         preview=config_transfer.import_config(document,dry_run=True)
         config_transfer.import_config(document,overwrite=True,preview_token=preview['preview_token'])
-        self.assertEqual(SERVICE_BY_ID[builtin['id']]['website_check']['port'],443)
+        self.assertEqual(SERVICE_BY_ID[builtin['id']]['website_check']['port'], document['services'][0]['port'])
 
     def test_probe_never_overwrites_systemd_state_time_or_error(self):
         from app import main

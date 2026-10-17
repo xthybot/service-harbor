@@ -172,7 +172,9 @@ def get_status(service_id: str) -> str:
     if not is_managed(service):
         from . import website_checks, service_urls
         url = service_urls.get_urls().get(service_id, service.get('open_url', ''))
-        return website_checks.details(website_checks.check(service.get('website_check', {}), url))
+        from .service_ports import get_ports
+        port = get_ports().get(service_id, service.get('port'))
+        return website_checks.details(website_checks.check(service.get('website_check', {}), url, service_port=port))
     identity = journal_identity(service_id)
     result = _execute(service, _systemctl(service_id, 'status', '--no-pager', '-n', '35'))
     if not _identity_matches(service_id, identity):

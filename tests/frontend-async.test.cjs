@@ -263,7 +263,7 @@ test('managed service editor keeps independent Check method available',()=>{
   const h=harness();h.api.state.renameTarget='A';h.node('service-host').value='local';h.node('service-unit').value='example.service';h.node('service-check-method').value='tcp';
   h.api.updateEditorLocation();
   assert.equal(h.node('service-check-row').hidden,false);assert.equal(h.node('service-check-method').disabled,false);
-  assert.equal(h.node('service-check-port-row').hidden,false);
+  assert.equal(h.node('service-open-url').required,true);
 });
 
 test('Overview attention links associated ports to Services and keeps standalone ports in Open ports',()=>{

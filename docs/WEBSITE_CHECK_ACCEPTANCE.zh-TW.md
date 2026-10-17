@@ -97,3 +97,9 @@ PLAYWRIGHT_MODULE=/path/to/node_modules/playwright node tests/managed-connectivi
 依據：[systemd v255 指令解析](https://raw.githubusercontent.com/systemd/systemd/v255/src/core/load-fragment.c)、[EnvironmentFile 的 glob 載入流程](https://raw.githubusercontent.com/systemd/systemd/v255/src/core/execute.c)。這是依上游行為撰寫的設定處理，未複製第三方程式碼。
 
 驗證：Python 全套 119 項與 Node 全套 23 項通過；新增測試以 `systemd-analyze verify --man=no` 唯讀檢查兩種模式的臨時 unit，要求零錯誤且無忽略欄位警告。另涵蓋 glob 跳脫、控制字元、行尾與提早拒絕不支援的執行檔路徑。實際解析驗證不會啟動 unit，也不能等同完整安裝或實際載入環境檔的驗證。沒有重啟／重裝正式服務；新 Ubuntu 安裝、模式遷移與開機流程仍未實機驗證。
+
+## TCP 目標沿用服務設定
+
+新增與編輯表單移除獨立 TCP host／port，選 TCP 時要求 Open URL。每次探測由 URL hostname 與目前 Service Port 決定目標；Service Port 留空則用 URL port／HTTP 80／HTTPS 443。API inventory、單項 Live／限時追蹤與無 unit 的 Status 均使用同一後端解析流程。有 URL 的歷史 TCP 覆寫不再優先，沒有 URL 的舊獨立目標僅保留相容讀取。HTTP 檢查不額外探測 Service Port。
+
+Services 摘要順序調整為 Total services、Running、Connectivity issues、Stopped、Failed。既有回歸腳本已配合移除的欄位調整；本輪僅執行 Python／JavaScript 語法檢查與 git diff --check，均通過，未執行測試套件或瀏覽器實測。先前全套測試結果屬於前一版本，不代表本輪已重跑。尚未部署或推送此變更。

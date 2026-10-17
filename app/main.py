@@ -137,7 +137,7 @@ def _decorate_services(rows: list[dict]) -> list[dict]:
     from concurrent.futures import ThreadPoolExecutor
     candidates = [row for row in rows if row.get('website_check', {}).get('method', 'disabled') != 'disabled']
     def probe(row):
-        result = website_checks.check(row['website_check'], row['open_url'])
+        result = website_checks.check(row['website_check'], row['open_url'], service_port=row.get('configured_port'))
         row['website_result'] = result
         if not row['managed']:
             row.update(status=result['status'], checked_at=result['checked_at'], error=result['error'])

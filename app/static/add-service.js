@@ -2,7 +2,7 @@
 (() => {
   const form = document.querySelector('#add-service-form');
   const feedback = document.querySelector('#add-form-feedback');
-  const fields = ['host_id', 'display_name', 'category', 'scope', 'description', 'unit', 'port', 'open_url', 'check_method', 'check_address', 'check_port'];
+  const fields = ['host_id', 'display_name', 'category', 'scope', 'description', 'unit', 'port', 'open_url', 'check_method'];
   let hosts = [], registering = false;
   const { api, showToast, refreshAll } = window.HostDashboard;
   const setText = (id, value) => { document.getElementById(id).textContent = value; };
@@ -14,7 +14,7 @@
     result.port = result.port ? Number(result.port) : null;
     if (result.service_type === 'external') { result.scope = ''; result.unit = ''; }
     if (!result.unit) result.port = null;
-    result.website_check = {method: result.check_method, address: result.check_address, port: result.check_port ? Number(result.check_port) : null};
+    result.website_check = {method: result.check_method};
     return { ...result, favorite: form.elements.favorite.checked };
   }
 
@@ -25,7 +25,6 @@
     const remote = draft.service_type === 'remote';
     const managed = !external && !!draft.unit;
     document.getElementById('add-check-row').hidden = false;
-    ['address', 'port'].forEach(field => { document.getElementById(`add-check-${field}-row`).hidden = draft.check_method !== 'tcp'; });
     const selectedHost = hosts.find(host => host.id === draft.host_id);
     document.getElementById('add-register').disabled = registering || (remote && (!selectedHost || (managed && !selectedHost.trusted)));
     setText('add-preview-host', external ? 'External website' : remote ? selectedHost?.name || 'Select a host' : 'This host');
@@ -33,17 +32,16 @@
       document.getElementById(id).hidden = external;
     });
     form.elements.check_method.disabled = false;
-    ['check_address', 'check_port'].forEach(name => { form.elements[name].disabled = draft.check_method !== 'tcp'; });
     form.elements.unit.disabled = external;
     document.getElementById('add-port-field').hidden = external;
     form.elements.port.disabled = !managed;
     form.elements.unit.required = false;
     document.getElementById('add-preview-unit').hidden = !managed;
     form.elements.scope.disabled = external;
-    form.elements.open_url.required = external || draft.check_method === 'http';
+    form.elements.open_url.required = external || ['http', 'tcp'].includes(draft.check_method);
     form.elements.unit.setCustomValidity('');
     form.elements.open_url.setCustomValidity('');
-    setText('add-url-requirement', external || draft.check_method === 'http' ? '* Required' : 'Optional');
+    setText('add-url-requirement', external || ['http', 'tcp'].includes(draft.check_method) ? '* Required' : 'Optional');
     setText('add-next-log', managed ? 'View status and live journal logs' : draft.check_method !== 'disabled' ? 'View reachability and last check time' : 'Open your configured website in a new tab');
     setText('add-next-control', managed ? 'Use Start / Stop / Restart controls' : 'Edit its settings in Services');
     document.querySelectorAll('[data-add-local-control]').forEach(item => { item.hidden = !managed; });
