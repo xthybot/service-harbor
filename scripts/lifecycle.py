@@ -370,7 +370,7 @@ def make_unit(mode, data):
                               f'Environment="XDG_RUNTIME_DIR=/run/user/{UID}"',
                               f'Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{UID}/bus"'])
     tokens = {'MARKER': MARKER, 'USER_MANAGER': manager, 'IDENTITY': identity,
-              'APP': unit_quote(APP), 'ENV': unit_quote(ENV), 'DATA': unit_quote(data),
+              'APP': str(APP), 'ENV': str(ENV), 'DATA': str(data),
               'PYTHON': unit_quote(str(APP / '.venv/bin/python').replace('$', '$$')),
               'TARGET': 'multi-user.target' if mode == 'system' else 'default.target'}
     template = (APP / 'systemd' / UNIT).read_text()
