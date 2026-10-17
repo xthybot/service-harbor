@@ -136,4 +136,4 @@ data/ 備份現在還包含主機、已註冊服務、私鑰與 pinned known_hos
 
 ## 各 workspace 的手動 Refresh
 
-Overview、Services、Open ports、Hosts 與 Add service 的右上角皆提供 Refresh。Overview 刷新服務／Port inventory 與主機列表；Services 刷新狀態及連通結果，Port inventory 沿用 metadata-only；Open ports 刷新服務與 TCP Port inventory。Hosts 與 Add service 更新主機清單及公鑰資訊，不執行 SSH Check connection，也不清空新增服務的表單或重載網頁。刷新時按鈕顯示 Refreshing 並暫時停用，失敗沿用原有錯誤提示。這些按鈕不會啟用定時刷新。
+Overview、Services、Open ports 提供 Refresh，放在頁首 Updated／最後更新時間右側，其他操作（Export JSON、Add port）之前。Hosts 與 Add service 不提供 Refresh。Overview 刷新服務／Port inventory 與主機列表；Services 刷新狀態及連通結果，Port inventory 沿用 metadata-only；Open ports 刷新服務與 TCP Port inventory。Refresh 不執行 SSH Check connection，也不重載網頁。刷新時按鈕顯示 Refreshing 並暫時停用，失敗沿用原有錯誤提示。這些按鈕不會啟用定時刷新。

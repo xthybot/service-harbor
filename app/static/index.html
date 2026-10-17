@@ -10,7 +10,7 @@
   <script src="/static/input-limits.js?v=lifecycle-3" defer></script>
   <script src="/static/async-state.js?v=lifecycle-3" defer></script>
   <script src="/static/modal-state.js?v=lifecycle-3" defer></script>
-  <script src="/static/app.js?v=workspace-refresh-1" defer></script>
+  <script src="/static/app.js?v=workspace-refresh-2" defer></script>
   <script src="/static/tracking.js?v=lifecycle-3" defer></script>
   <script src="/static/overview.js?v=connectivity-1" defer></script>
   <script src="/static/hosts.js?v=workspace-refresh-1" defer></script>
@@ -86,7 +86,7 @@
       </section>
 
       <section id="services-view" class="page-view" hidden>
-        <div class="page-heading"><div><p class="eyebrow">SERVICE CATALOG</p><h1>Services</h1><p class="page-subtitle">Check health and manage allowlisted systemd units.</p></div><div class="heading-actions"><span class="updated-label">Updated <strong id="services-updated-at">just now</strong></span><button id="export-services" class="button button-secondary" type="button">↓ Export JSON</button><button id="services-refresh-button" data-workspace-refresh="services" class="button button-secondary" type="button">↻ Refresh</button></div></div>
+        <div class="page-heading"><div><p class="eyebrow">SERVICE CATALOG</p><h1>Services</h1><p class="page-subtitle">Check health and manage allowlisted systemd units.</p></div><div class="heading-actions"><span class="updated-label">Updated <strong id="services-updated-at">just now</strong></span><button id="services-refresh-button" data-workspace-refresh="services" class="button button-secondary" type="button">↻ Refresh</button><button id="export-services" class="button button-secondary" type="button">↓ Export JSON</button></div></div>
         <div class="summary-grid" aria-label="Service status summary">
           <article class="summary-card summary-total" data-summary-filter="all" tabindex="0" role="button" aria-label="Show all services"><div class="summary-top"><span>Total services</span><span class="summary-icon icon-neutral">▤</span></div><div class="summary-value" id="count-total">—</div><div class="summary-foot"><span class="foot-mark">↗</span> In your service catalog</div></article>
           <article class="summary-card" data-summary-filter="Running" tabindex="0" role="button" aria-label="Show running services"><div class="summary-top"><span>Running</span><span class="summary-icon icon-green">✓</span></div><div class="summary-value" id="count-running">—</div><div class="summary-foot"><span class="status-dot dot-green"></span> Service state is running</div></article>
@@ -102,14 +102,14 @@
       </section>
 
       <section id="ports-view" class="page-view" hidden>
-        <div class="page-heading"><div><p class="eyebrow">NETWORK INVENTORY</p><h1>Open ports</h1><p class="page-subtitle">Every recorded TCP port is checked from this dashboard host. Select a row to check it again.</p></div><div class="heading-actions"><span class="port-refresh-note"><span class="live-dot"></span><span id="manual-ports-updated">Not checked yet</span></span><button id="manual-port-add" type="button" class="button button-primary">＋ Add port</button><button id="ports-refresh-button" data-workspace-refresh="ports" class="button button-secondary" type="button">↻ Refresh</button></div></div>
+        <div class="page-heading"><div><p class="eyebrow">NETWORK INVENTORY</p><h1>Open ports</h1><p class="page-subtitle">Every recorded TCP port is checked from this dashboard host. Select a row to check it again.</p></div><div class="heading-actions"><span class="port-refresh-note"><span class="live-dot"></span><span id="manual-ports-updated">Not checked yet</span></span><button id="ports-refresh-button" data-workspace-refresh="ports" class="button button-secondary" type="button">↻ Refresh</button><button id="manual-port-add" type="button" class="button button-primary">＋ Add port</button></div></div>
         <div class="port-toolbar"><label class="search-field"><span class="search-icon">⌕</span><input id="port-search" type="search" placeholder="Search by host, port, or service…" autocomplete="off"></label></div>
         <div class="port-host-toolbar"><label class="select-wrap"><select id="port-host-filter" aria-label="Filter ports by host"><option value="all">All hosts</option></select></label><div id="port-host-status" class="port-host-status" aria-label="Configured running service ports by host"></div></div>
         <div id="ports-list" class="ports-list"></div>
       </section>
 
       <section id="hosts-view" class="page-view" hidden>
-        <div class="page-heading"><div><p class="eyebrow">REMOTE CONNECTIONS</p><h1>Hosts</h1><p class="page-subtitle">Register a host first, then select it when adding a service.</p></div><div class="heading-actions"><button id="host-add-toggle" type="button" class="button button-primary">＋ Add host</button><button id="host-help-toggle" type="button" class="button button-secondary">ⓘ SSH guide</button><button id="hosts-refresh-button" data-workspace-refresh="hosts" class="button button-secondary" type="button">↻ Refresh</button></div></div>
+        <div class="page-heading"><div><p class="eyebrow">REMOTE CONNECTIONS</p><h1>Hosts</h1><p class="page-subtitle">Register a host first, then select it when adding a service.</p></div><div class="heading-actions"><button id="host-add-toggle" type="button" class="button button-primary">＋ Add host</button><button id="host-help-toggle" type="button" class="button button-secondary">ⓘ SSH guide</button></div></div>
         <div class="hosts-summary"><div><span>THIS HOST</span><strong>Local</strong><small>Existing services stay on this machine</small></div><div><span>REMOTE HOSTS</span><strong id="hosts-total">0</strong><small>Registered SSH connections</small></div><div><span>LAST CHECK CONNECTED</span><strong id="hosts-connected">0</strong><small>Use Check connection to update</small></div></div>
         <div class="hosts-workspace">
           <section class="hosts-inventory" aria-labelledby="remote-hosts-title">
@@ -126,7 +126,7 @@
       </section>
 
       <section id="add-service-view" class="page-view" hidden>
-        <div class="page-heading"><div><p class="eyebrow">EXPAND YOUR WORKSPACE</p><h1>Add service</h1><p class="page-subtitle">Bring another service into your workspace. Start with its details.</p></div><div class="heading-actions"><span class="add-preview-badge">Live registration</span><button id="import-services" class="button button-secondary" type="button">↑ Import JSON</button><input id="import-services-file" type="file" accept=".json,application/json" hidden><button id="add-service-refresh-button" data-workspace-refresh="add-service" class="button button-secondary" type="button">↻ Refresh</button></div></div>
+        <div class="page-heading"><div><p class="eyebrow">EXPAND YOUR WORKSPACE</p><h1>Add service</h1><p class="page-subtitle">Bring another service into your workspace. Start with its details.</p></div><div class="heading-actions"><span class="add-preview-badge">Live registration</span><button id="import-services" class="button button-secondary" type="button">↑ Import JSON</button><input id="import-services-file" type="file" accept=".json,application/json" hidden></div></div>
         <div class="add-layout">
           <form id="add-service-form" class="add-form-card">
             <div class="add-section-heading"><div><h2>Service settings</h2></div></div>

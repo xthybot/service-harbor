@@ -962,9 +962,7 @@
       button.setAttribute("aria-busy", "true");
       button.textContent = "↻ Refreshing…";
       try {
-        // Host refresh updates the registration dropdown without resetting its draft.
-        if (["hosts", "add-service"].includes(workspace)) await window.HostDashboard.refreshHosts?.();
-        else if (workspace === "overview") await Promise.all([refreshAll(), window.HostDashboard.refreshHosts?.()]);
+        if (workspace === "overview") await Promise.all([refreshAll(), window.HostDashboard.refreshHosts?.()]);
         else await refreshAll();
       } catch (error) {
         if (epoch === auth.epoch && !error.stale) showToast(error.message, "error");

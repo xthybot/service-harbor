@@ -84,4 +84,4 @@ uv 安裝模式使用目前 Python 並禁止自動下載 Python，不要求環�
 
 ### Workspace Refresh
 
-五個 workspace 的 page-heading 都必須保留 data-workspace-refresh 按鈕，使用 app.js 的共同處理器。Hosts 原列表內的按鈕已移到頁首；勿新增第二個 listener 造成重複請求。Add service 更新主機選項時保留草稿；Refresh 不等同 location.reload，也不觸發 SSH 信任或連線驗證。
+只有 Overview、Services、Open ports 的 page-heading 提供 data-workspace-refresh 按鈕，緊接 Updated／最後更新時間右側，位於 Export JSON 或 Add port 等操作之前，使用 app.js 的共同處理器。Hosts 與 Add service 不放 Refresh。Refresh 不等同 location.reload，也不觸發 SSH 信任或連線驗證。
