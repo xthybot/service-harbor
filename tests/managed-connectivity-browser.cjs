@@ -14,6 +14,8 @@ const fixture=JSON.parse(fs.readFileSync(process.env.FIXTURE_LOG||'/tmp/service-
   const initialProbeCount=(await metrics())['/_tcp_probe']||0;
   await page.goto(fixture.dashboard+'/#services');await page.locator('#login-password').fill('isolated-browser-only');await page.locator('#login-form button[type=submit]').click();
   await card('svc-managed-running').waitFor();
+  assert.deepEqual(await page.locator('#services-view .summary-grid .summary-card').evaluateAll(cards=>cards.map(card=>card.dataset.summaryFilter)),['all','Running','Connectivity','Stopped','Failed']);
+  mark('Services summary order puts Connectivity issues third');
   assert.equal((await metrics())['/_tcp_probe']||0,initialProbeCount);
   assert.equal(await page.locator('#count-running').textContent(),'1');assert.equal(await page.locator('#count-connectivity').textContent(),'4');
   for(const [id,cls] of [['svc-managed-running','status-warning'],['svc-managed-failed','status-failed'],['svc-managed-stopped','status-stopped'],['svc-website','status-warning']]){
@@ -33,7 +35,9 @@ const fixture=JSON.parse(fs.readFileSync(process.env.FIXTURE_LOG||'/tmp/service-
   await page.locator('#rename-form button[type=submit]').click();assert.equal((await save).status(),200);await page.locator('#rename-modal').waitFor({state:'hidden'});
   await page.waitForFunction(()=>document.querySelector('#drawer-meta').textContent.includes('TCP Reachable'));
   assert.match(await page.locator('#drawer-meta').textContent(),/Running/);
-  assert.ok(((await metrics())['/_tcp_probe']||0)>=initialProbeCount);
+  assert.equal((await metrics())['/_tcp_probe']||0,initialProbeCount);
+  const checked=await (await context.request.get(fixture.dashboard+'/api/services/svc-managed-running/live')).json();
+  assert.equal(checked.service.website_result.target,`127.0.0.1:${fixture.tcp_port}`);
   mark('managed editor derives TCP from Open URL host and Service Port; systemd remains Running');
   await page.locator('#drawer-rename').click();await page.locator('#rename-modal').waitFor({state:'visible'});await page.locator('#service-check-method').selectOption('http');
   const again=page.waitForResponse(r=>r.url().endsWith('/svc-managed-running/edit')&&r.request().method()==='PUT');await page.locator('#rename-form button[type=submit]').click();assert.equal((await again).status(),200);await page.locator('#rename-modal').waitFor({state:'hidden'});

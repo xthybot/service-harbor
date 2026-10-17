@@ -103,3 +103,15 @@ PLAYWRIGHT_MODULE=/path/to/node_modules/playwright node tests/managed-connectivi
 新增與編輯表單移除獨立 TCP host／port，選 TCP 時要求 Open URL。每次探測由 URL hostname 與目前 Service Port 決定目標；Service Port 留空則用 URL port／HTTP 80／HTTPS 443。API inventory、單項 Live／限時追蹤與無 unit 的 Status 均使用同一後端解析流程。有 URL 的歷史 TCP 覆寫不再優先，沒有 URL 的舊獨立目標僅保留相容讀取。HTTP 檢查不額外探測 Service Port。
 
 Services 摘要順序調整為 Total services、Running、Connectivity issues、Stopped、Failed。既有回歸腳本已配合移除的欄位調整；本輪僅執行 Python／JavaScript 語法檢查與 git diff --check，均通過，未執行測試套件或瀏覽器實測。先前全套測試結果屬於前一版本，不代表本輪已重跑。尚未部署或推送此變更。
+
+## TCP 目標改版部署驗收
+
+使用者要求部署測試後，在獨立的公開版 preview user service 執行 fixture；綁定 `0.0.0.0:18771`，TemporaryDirectory 保存全部測試資料。正式私人 Dashboard 未部署或重啟。測試單元的 systemd 狀態／journal 是合成資料，真實 systemd／SSH 執行被 fixture 禁止；HTTP、HTTPS、TCP 使用真實 loopback listener。
+
+- Python 全套 121 項通過（新增目前 URL／Service Port 優先、忽略舊覆寫、變更後切換目標，以及 URL port／80／443／IPv6 fallback）。
+- Node 全套 23 項通過。
+- managed Chrome 情境通過：摘要順序確為 Total services／Running／Connectivity issues／Stopped／Failed；編輯不含獨立 TCP host／port；以真實 TCP listener 確認 API target 等於 URL hostname 加 Service Port，systemd 狀態仍獨立；沒有隱含 Open ports 探測。保留 Overview 路由、HTTPS、手機版與無未捕捉前端錯誤驗證。
+- website Chrome 情境通過：新增 TCP 選項不出現重複欄位、Open URL 必填；HTTP → URL-derived TCP 編輯、TLS 信任／錯誤、Live、限時追蹤、關頁停止與重開恢復倒數、停用檢查、手機版均通過。
+- preview 的 HTTP 回應 200，ActiveState=active、SubState=running、NRestarts=0。這是隔離測試部署，不是完整新機安裝／重開機驗證；不代表真實跨主機 systemd／SSH 已實測。
+
+本節取代前節「尚未實測」的當時狀態；原始紀錄保留以供追溯。測試產物與臨時登入資料不納入 Git。

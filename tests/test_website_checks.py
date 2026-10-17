@@ -72,6 +72,28 @@ class WebsiteChecks(unittest.TestCase):
         self.assertEqual(result['status'], 'Stopped')
         self.assertTrue(result['error'])
 
+    def test_tcp_derives_current_url_and_service_port_instead_of_stale_overrides(self):
+        old = {'method': 'tcp', 'address': 'old.invalid', 'port': 1111}
+        with patch.object(website_checks.socket, 'create_connection') as connect:
+            first = website_checks.check(old, 'https://first.invalid:4443/app', service_port=8123)
+            connect.assert_called_with(('first.invalid', 8123), timeout=website_checks.TIMEOUT)
+            self.assertEqual(first['target'], 'first.invalid:8123')
+            second = website_checks.check(old, 'https://second.invalid:5443', service_port=9123)
+            connect.assert_called_with(('second.invalid', 9123), timeout=website_checks.TIMEOUT)
+            self.assertEqual(second['target'], 'second.invalid:9123')
+            self.assertEqual(second['status'], 'Running')
+        self.assertEqual(old, {'method': 'tcp', 'address': 'old.invalid', 'port': 1111})
+
+    def test_tcp_uses_url_port_then_scheme_default_when_service_port_is_empty(self):
+        with patch.object(website_checks.socket, 'create_connection') as connect:
+            for url, host, port in [('http://example.invalid:8123/path', 'example.invalid', 8123),
+                                    ('http://example.invalid/path', 'example.invalid', 80),
+                                    ('https://example.invalid/path', 'example.invalid', 443),
+                                    ('https://[::1]:8443/path', '::1', 8443)]:
+                with self.subTest(url=url):
+                    self.assertEqual(website_checks.check({'method': 'tcp'}, url)['status'], 'Running')
+                    connect.assert_called_with((host, port), timeout=website_checks.TIMEOUT)
+
     def test_timeout_and_disabled_do_not_download_or_connect(self):
         with patch.object(website_checks, 'TIMEOUT', .1):
             result = website_checks.check({'method': 'http'}, self.targets.http + '/slow')
