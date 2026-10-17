@@ -83,3 +83,17 @@ PLAYWRIGHT_MODULE=/path/to/node_modules/playwright node tests/managed-connectivi
 ```
 
 結束後在終端 1 按 Ctrl+C。實測截圖為 `/tmp/service-harbor-connectivity-services.png`、`/tmp/service-harbor-connectivity-mobile.png`，未納入 Git。沒有部署／重啟正式服務，沒有使用真實 SSH、sudo 或 unit 控制；跨機網路及真實 systemd 與連通探測並行仍屬未實機驗證範圍。
+
+## 2026-10-17：安裝器特殊路徑修正
+
+先前 `test_unit_directive_encoding` 的失敗已修正。重新核對 Ubuntu 的 systemd 255 後確認，舊測試對所有路徑一律加引號的預期也不正確；不能單純還原舊寫法。現在依指令分別產生設定：
+
+- `WorkingDirectory` 使用原始絕對路徑並跳脫 `%`，不在整段外加引號。
+- `EnvironmentFile` 另外跳脫 glob 字元與反斜線，避免設定路徑被當成萬用字元模式。
+- `ReadWritePaths` 使用 list 欄位需要的引號／跳脫。
+- `ExecStart` 的執行檔保留字面 `$`，並跳脫 `%`。專案路徑含雙引號、單引號或反斜線時，在設定、套件安裝與服務操作前明確拒絕；空白、`%`、`$` 可用。
+- 所有上述路徑拒絕相對路徑與控制字元，避免換行注入 unit 設定。
+
+依據：[systemd v255 指令解析](https://raw.githubusercontent.com/systemd/systemd/v255/src/core/load-fragment.c)、[EnvironmentFile 的 glob 載入流程](https://raw.githubusercontent.com/systemd/systemd/v255/src/core/execute.c)。這是依上游行為撰寫的設定處理，未複製第三方程式碼。
+
+驗證：Python 全套 119 項與 Node 全套 23 項通過；新增測試以 `systemd-analyze verify --man=no` 唯讀檢查兩種模式的臨時 unit，要求零錯誤且無忽略欄位警告。另涵蓋 glob 跳脫、控制字元、行尾與提早拒絕不支援的執行檔路徑。實際解析驗證不會啟動 unit，也不能等同完整安裝或實際載入環境檔的驗證。沒有重啟／重裝正式服務；新 Ubuntu 安裝、模式遷移與開機流程仍未實機驗證。

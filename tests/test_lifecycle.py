@@ -352,14 +352,76 @@ class LifecycleSafety(unittest.TestCase):
 
     def test_unit_directive_encoding(self):
         source = Path(__file__).parents[1] / 'systemd' / lc.UNIT
+        weird = self.home / 'project space %q dollar$'
+        (weird / 'systemd').mkdir(parents=True)
+        (weird / 'systemd' / lc.UNIT).write_text(source.read_text())
+        env = weird / 'settings quote" slash\\' / 'dashboard.env'
+        with patch.object(lc, 'APP', weird), patch.object(lc, 'ENV', env):
+            for mode in ('user', 'system'):
+                with self.subTest(mode=mode):
+                    text = lc.make_unit(mode, weird / 'data')
+                    # WorkingDirectory and EnvironmentFile are scalar paths,
+                    # unlike ReadWritePaths and the ExecStart argument list.
+                    self.assertIn('WorkingDirectory=' + str(weird).replace('%', '%%') + '\n', text)
+                    self.assertIn('EnvironmentFile=' + str(env).replace('\\', '\\\\').replace('%', '%%') + '\n', text)
+                    self.assertIn('ReadWritePaths=' + lc.unit_quote(weird / 'data') + '\n', text)
+                    self.assertIn(lc.unit_quote(str(weird / '.venv/bin/python')), text)
+                    self.assertNotIn('@ENV@', text)
+
+    @unittest.skipUnless(Path('/usr/bin/systemd-analyze').exists(), 'systemd parser not installed')
+    def test_generated_units_pass_real_systemd_parser(self):
+        import subprocess
+        source = Path(__file__).parents[1] / 'systemd' / lc.UNIT
+        weird = self.home / 'project space %q dollar$'
+        (weird / 'systemd').mkdir(parents=True)
+        (weird / 'systemd' / lc.UNIT).write_text(source.read_text())
+        executable = weird / '.venv/bin/python'
+        executable.parent.mkdir(parents=True)
+        executable.write_text('#!/bin/sh\nexit 0\n'); executable.chmod(0o700)
+        env = weird / 'settings quote" slash\\' / 'dashboard.env'
+        env.parent.mkdir(); env.write_text('DASHBOARD_PORT=8765\n')
+        data = weird / 'data with space %q quote" slash\\'
+        data.mkdir()
+        with patch.object(lc, 'APP', weird), patch.object(lc, 'ENV', env):
+            for mode in ('user', 'system'):
+                with self.subTest(mode=mode):
+                    unit = self.root / (mode + '-fixture.service')
+                    unit.write_text(lc.make_unit(mode, data))
+                    # verify only parses the temporary unit. It never starts it.
+                    result = subprocess.run(['/usr/bin/systemd-analyze', 'verify', '--man=no', str(unit)],
+                                            capture_output=True, text=True, timeout=15)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, '', 'Ignored path directives are unsafe even if verify exits 0')
+
+    def test_environment_file_escapes_glob_metacharacters(self):
+        value = '/tmp/settings[1]*/question?/slash\\/100%/dashboard.env'
+        self.assertEqual(lc.unit_environment_file_path(value),
+                         '/tmp/settings\\[1\\]\\*/question\\?/slash\\\\/100%%/dashboard.env')
+
+    def test_unit_paths_reject_control_characters_and_relative_paths(self):
+        source = Path(__file__).parents[1] / 'systemd' / lc.UNIT
         (self.app / 'systemd').mkdir()
         (self.app / 'systemd' / lc.UNIT).write_text(source.read_text())
-        weird = self.home / 'space % dollar$ quote" slash\\'
-        with patch.object(lc, 'ENV', weird / 'dashboard.env'):
-            text = lc.make_unit('user', weird / 'data')
-        self.assertIn('WorkingDirectory="' + str(self.app) + '"', text)
-        self.assertIn('space %% dollar$ quote\\" slash\\\\', text)
-        self.assertNotIn('@ENV@', text)
+        for value in ('relative/path', '/tmp/a\nInjected=value', '/tmp/a\tname', '/tmp/a\x00name'):
+            for field in ('APP', 'ENV', 'DATA'):
+                with self.subTest(value=value, field=field), self.assertRaises(RuntimeError):
+                    if field == 'DATA':
+                        lc.make_unit('user', Path(value))
+                    else:
+                        with patch.object(lc, field, Path(value)):
+                            lc.make_unit('user', self.data)
+
+    def test_unsupported_executable_paths_fail_before_installation_changes(self):
+        for suffix in ('quote"', "apostrophe'", 'slash\\'):
+            with self.subTest(suffix=suffix), patch.object(lc, 'APP', self.home / suffix), patch.object(lc, 'get_settings', side_effect=AssertionError('Must reject before settings or side effects')):
+                with self.assertRaisesRegex(RuntimeError, 'executable'):
+                    lc.install()
+
+    def test_scalar_directory_trailing_characters_do_not_continue_unit_line(self):
+        self.assertEqual(lc.unit_scalar_path('/tmp/name\\', directory=True), '/tmp/name\\/')
+        self.assertEqual(lc.unit_scalar_path('/tmp/name ', directory=True), '/tmp/name /')
+        for value in ('/tmp/name\\', '/tmp/name '):
+            with self.subTest(value=value), self.assertRaises(RuntimeError): lc.unit_scalar_path(value)
 
     def test_unit_search_path_must_match_real_manager(self):
         from subprocess import CompletedProcess

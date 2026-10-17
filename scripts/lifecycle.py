@@ -137,7 +137,46 @@ def env_quote(value):
 
 
 def unit_quote(value):
-    return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
+    text = str(value)
+    if any(ord(c) < 32 or ord(c) == 127 for c in text):
+        fail('Systemd values must be single-line text without control characters.')
+    return '"' + text.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
+
+
+def unit_path_text(value):
+    text = str(value)
+    if not Path(text).is_absolute() or any(ord(c) < 32 or ord(c) == 127 for c in text):
+        fail('Systemd path must be absolute and contain no control characters.')
+    return text
+
+
+def unit_scalar_path(value, *, directory=False):
+    # WorkingDirectory and EnvironmentFile do not unquote their entire value.
+    # Preserve spaces/quotes/backslashes literally, and escape specifiers only.
+    text = unit_path_text(value)
+    if text.endswith((' ', '\\')):
+        if not directory:
+            fail('Systemd scalar file paths must not end in whitespace or a backslash.')
+        # A slash preserves a directory's trailing space/backslash without
+        # trimming or accidentally continuing the next line in the unit file.
+        text += '/'
+    return text.replace('%', '%%')
+
+
+def unit_environment_file_path(value):
+    # EnvironmentFile is a scalar directive, then interpreted as a glob at
+    # execution time. Escape glob syntax so exactly this file is loaded.
+    return ''.join('\\' + char if char in '\\*?[]' else char
+                   for char in unit_scalar_path(value))
+
+
+def unit_executable_path(value):
+    text = unit_path_text(value)
+    if any(char in text for char in ('"', "'", '\\')):
+        fail('Systemd executable paths cannot contain quotes or backslashes. Move the project to another directory.')
+    # The first ExecStart word is an executable path, not an argument subject
+    # to environment expansion: keep literal dollar signs unchanged.
+    return unit_quote(text)
 
 
 def installed_units():
@@ -370,8 +409,9 @@ def make_unit(mode, data):
                               f'Environment="XDG_RUNTIME_DIR=/run/user/{UID}"',
                               f'Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{UID}/bus"'])
     tokens = {'MARKER': MARKER, 'USER_MANAGER': manager, 'IDENTITY': identity,
-              'APP': str(APP), 'ENV': str(ENV), 'DATA': str(data),
-              'PYTHON': unit_quote(str(APP / '.venv/bin/python').replace('$', '$$')),
+              'APP': unit_scalar_path(APP, directory=True), 'ENV': unit_environment_file_path(ENV),
+              'DATA': unit_quote(unit_path_text(data)),
+              'PYTHON': unit_executable_path(APP / '.venv/bin/python'),
               'TARGET': 'multi-user.target' if mode == 'system' else 'default.target'}
     template = (APP / 'systemd' / UNIT).read_text()
     return re.sub(r'@(MARKER|USER_MANAGER|IDENTITY|APP|ENV|DATA|PYTHON|TARGET)@',
@@ -439,6 +479,7 @@ def verify(mode, host, port):
 
 
 def install(reset=False, backend=None):
+    unit_executable_path(APP / '.venv/bin/python')  # Fail before settings, pip or service changes.
     for path in (APP, CONFIG_BASE, CONFIG, ENV, RECEIPT, APP / '.venv'): safe_path(path)
     installed = installed_units()
     old = environment()

@@ -73,3 +73,7 @@ uv 安裝模式使用目前 Python 並禁止自動下載 Python，不要求環�
 ## 分享修正維護規則
 
 預設 catalog 只保留 Dashboard。其他主機固定清單存 gitignored local-catalog.json；不可再硬編碼個人 unit。所有 JSON 讀改寫必須經 storage 共用鎖；多檔更動用 transaction，不得旁路 direct write。session 不快取，SSE 靜默時仍需定期驗證。密碼規格改共用 password-policy.json。匯入必須逐塊限制位元組，不回退為 request.body()。驗收以 TASKS.md 與 tests/ 為準，測試必須隔離 DATA_DIR。
+
+### systemd 路徑產生規則
+
+`lifecycle.py` 的 WorkingDirectory／EnvironmentFile 是 scalar 指令，勿對整個值套用 unit_quote。EnvironmentFile 還會在執行時 glob，必須跳脫 glob 字元。ReadWritePaths 是 list，應保留引號與跳脫。ExecStart 第一個執行檔 token 不做 `$` 變數展開，不可將字面 `$` 改成 `$$`；引號與反斜線在執行檔路徑不支援，安裝需提早拒絕。驗證產生的 user/system unit 時，同時要求 systemd-analyze 的退出碼為零且 stderr 無忽略設定警告。上述解析驗證不會實際啟動服務。
