@@ -135,10 +135,12 @@ def _decorate_services(rows: list[dict]) -> list[dict]:
             service["status"] = "Linked" if service["open_url"] else "Unmanaged"
     from . import website_checks
     from concurrent.futures import ThreadPoolExecutor
-    candidates = [row for row in rows if not row['managed'] and row.get('website_check', {}).get('method', 'disabled') != 'disabled']
+    candidates = [row for row in rows if row.get('website_check', {}).get('method', 'disabled') != 'disabled']
     def probe(row):
         result = website_checks.check(row['website_check'], row['open_url'])
-        row.update(status=result['status'], checked_at=result['checked_at'], error=result['error'], website_result=result)
+        row['website_result'] = result
+        if not row['managed']:
+            row.update(status=result['status'], checked_at=result['checked_at'], error=result['error'])
     if candidates:
         with ThreadPoolExecutor(max_workers=4) as executor:
             list(executor.map(probe, candidates))
@@ -157,8 +159,8 @@ def service_live(service_id: str, _token: str = Depends(_authenticated)):
     if service_id not in SERVICE_BY_ID:
         raise HTTPException(status_code=404, detail='Unknown service')
     service = _decorate_services([systemd.get_service(service_id)])[0]
-    port = manual_ports.check_configured(service_id) if service['configured_port'] else None
-    return {'service': service, 'port': port}
+    # A recorded Port is metadata; Services only probes the selected Check method.
+    return {'service': service, 'port': None}
 
 @app.get('/api/services/export')
 def export_services(response: Response, selection: str = 'all', value: str = '', _token: str = Depends(_authenticated)):
@@ -293,8 +295,8 @@ def set_service_favorite(service_id: str, body: ServiceFavoriteBody, request: Re
     return {"id": service_id, "favorite": favorite}
 
 @app.get("/api/ports")
-def ports(_token: str = Depends(_authenticated)):
-    return systemd.get_port_inventory()
+def ports(_token: str = Depends(_authenticated), probe: bool = True):
+    return manual_ports.list_configured_checked(probe=probe)
 
 
 @app.get('/api/ports/check')
@@ -321,8 +323,8 @@ def remove_service_port(service_id: str, request: Request, _token: str = Depends
     return {'ok': True}
 
 @app.get('/api/ports/manual')
-def get_manual_ports(_token: str = Depends(_authenticated)):
-    return _safe_call(manual_ports.list_checked)
+def get_manual_ports(_token: str = Depends(_authenticated), probe: bool = True):
+    return _safe_call(manual_ports.list_checked, probe)
 
 @app.post('/api/ports/manual/check')
 def check_manual_port(body: ManualPortBody, request: Request, exclude_id: str = '', _token: str = Depends(_authenticated)):

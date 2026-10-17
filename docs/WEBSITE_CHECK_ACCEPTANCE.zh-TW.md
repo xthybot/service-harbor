@@ -58,3 +58,28 @@ PLAYWRIGHT_MODULE=/path/to/node_modules/playwright node tests/website-browser.cj
 ## 尚未驗證
 
 本次未執行全新 Ubuntu 的安裝／reset／uninstall／重新開機，也未驗證真實跨機網路、防火牆、代理、公開網站或非 Chrome 瀏覽器。Git 更新使用真實 Git 與本地來源，沒有透過 GitHub 網路傳輸；有本地程式修改、分支分歧或衝突時依維運文件停止並人工處理，不能宣稱自動保留任意追蹤檔的衝突內容。Socket timeout 不涵蓋所有作業系統 DNS 解析延遲。HTTP Running 表示已取得符合規則的回應，不等於網站業務功能正常。
+
+## 2026-10-17：systemd 與連通檢查共存
+
+本次增加有 unit 與內建服務的獨立 Check method，包含 metadata 編輯及匯入／匯出。Service port 不再在 Services 隱含觸發 TCP；Services 取得 Port metadata 使用 probe=false。新增 Connectivity issues 摘要與篩選；systemd Failed 紅燈、Running + 連通失敗黃燈、Stopped 灰燈並另加黃色 badge，無 unit 的連通失敗為黃燈。Needs attention 以 Service 為優先路由，對同一服務的連通與 Port 問題去重；只有無唯一服務關聯的 Port 開啟 Open ports。
+
+驗證結果：
+
+- `tests/test_service_connectivity.py`：6 項通過，涵蓋 managed／內建設定保存、匯出匯入、保持 systemd status／checked_at／error、禁止 Service port 隱含探測、Port metadata 不連網、舊 URL API 不可清空啟用 HTTP 檢查的目標。
+- Node 全套 23 項通過，新增主燈優先順序、摘要獨立計數與篩選、managed 編輯欄位，以及 Overview 關聯導向／去重回歸。
+- Chrome 的 `managed-connectivity-browser.cjs` 完整情境通過：以合成 systemd 狀態搭配真實 HTTP／HTTPS／TCP listener 驗證新增／編輯、摘要、燈號、Services 不做隱含 TCP、Overview 導向 Services，以及獨立 Port 導向 Open ports；390px 手機版無水平溢出、未捕捉頁面錯誤為零。fixture 禁止真實 systemd／SSH 執行，控制與 journal 皆使用合成回應。
+- 原有 `website-browser.cjs` 重跑，驗證純網頁新增／編輯及 Live／限時追蹤保持正常。
+- Python 全套執行 114 項：113 項通過，1 項既有失敗 `test_unit_directive_encoding`。在獨立臨時 snapshot 的未修改基準 e678715 上重跑同項測試亦失敗：原因是使用者指定保留的 lifecycle.py 直接 str(APP／ENV／DATA) 寫法，不符合舊測試的引號／特殊路徑跳脫預期。本次沒有更動 lifecycle.py，也沒有刪除、略過或改弱此測試；不能宣稱全套通過。前面 108 項全過的紀錄發生在該自訂修改合併前。
+- Python／JavaScript 語法與 git diff --check 通過。既有 `.icon-button` 的使用者寬度／字級修改保留；CSS 只追加本次狀態及摘要排版規則。
+
+重跑 managed Chrome 情境（先確認 18771 未使用）：
+
+```bash
+# 終端 1；測試資料與憑證放於 TemporaryDirectory
+PYTHONPATH=. .venv/bin/python tests/website_fixture.py --managed --port 18771 > /tmp/service-harbor-managed-fixture.log 2>&1
+
+# 終端 2
+PLAYWRIGHT_MODULE=/path/to/node_modules/playwright node tests/managed-connectivity-browser.cjs
+```
+
+結束後在終端 1 按 Ctrl+C。實測截圖為 `/tmp/service-harbor-connectivity-services.png`、`/tmp/service-harbor-connectivity-mobile.png`，未納入 Git。沒有部署／重啟正式服務，沒有使用真實 SSH、sudo 或 unit 控制；跨機網路及真實 systemd 與連通探測並行仍屬未實機驗證範圍。

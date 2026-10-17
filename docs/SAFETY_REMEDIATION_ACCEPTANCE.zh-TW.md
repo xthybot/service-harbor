@@ -66,3 +66,7 @@
 ### 2026-10-17：後續實測
 
 在隔離 loopback HTTP／HTTPS／TCP 端點、真實 Uvicorn HTTP API 和 Chrome 完成測試，並新增可重跑驗證。原先僅完成語法檢查的限制已由此次覆蓋；完整範圍、實測中修正、重跑方式與剩餘限制見 [純網頁在線檢查實測](WEBSITE_CHECK_ACCEPTANCE.zh-TW.md)。正式版本仍未部署，未操作正式服務。
+
+### systemd 與連通檢查共存
+
+有 unit 的服務也可保存 Check method，systemd 主狀態與連通結果各自顯示；Services 新增黃色 Connectivity issues 分類。Overview 的服務／Port 關聯異常改為優先開啟 Services 詳情。實測與既有 lifecycle 測試失敗的基準核對，見 [連通檢查驗收](WEBSITE_CHECK_ACCEPTANCE.zh-TW.md#2026-10-17systemd-與連通檢查共存)。

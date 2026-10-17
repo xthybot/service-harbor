@@ -11,6 +11,7 @@ TIMEOUT = 4
 
 
 def normalize(value, *, managed=False, url=''):
+    # A unit does not disable the independent network check.
     if value is None:
         value = {}
     if not isinstance(value, dict) or set(value) - {'method', 'address', 'port'}:
@@ -18,8 +19,6 @@ def normalize(value, *, managed=False, url=''):
     method = value.get('method', 'disabled')
     if method not in ('disabled', 'http', 'tcp'):
         raise ValueError('Choose Disabled, HTTP / HTTPS, or TCP.')
-    if managed:
-        return {'method': 'disabled'}
     if method == 'disabled':
         return {'method': method}
     url = validate_url(url)
@@ -48,6 +47,7 @@ def check(settings, url):
     result = {'method': method, 'status': 'Stopped', 'error': '', 'http_status': None}
     connection = None
     try:
+        settings = normalize(settings, url=url)
         parsed = urlsplit(validate_url(url))
         if method == 'http':
             connection_type = http.client.HTTPSConnection if parsed.scheme == 'https' else http.client.HTTPConnection

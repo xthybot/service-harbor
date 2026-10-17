@@ -8,7 +8,7 @@
   const stamp = value => value ? `Checked ${new Date(value).toLocaleString()}` : 'Not checked';
   const newest = rows => rows.map(row => row.checked_at).filter(Boolean).sort().at(-1);
   const name = service => displayName(service);
-  const badge = status => `<span class="ov-badge ov-${status === 'Running' || status === 'Open' ? 'good' : status === 'Failed' ? 'bad' : status === 'Unavailable' || status === 'Unreachable' ? 'warn' : 'neutral'}">${esc(status)}</span>`;
+  const badge = status => `<span class="ov-badge ov-${status === 'Running' || status === 'Open' ? 'good' : status === 'Failed' ? 'bad' : status === 'Unavailable' || status.includes('Unreachable') ? 'warn' : 'neutral'}">${esc(status)}</span>`;
   function go(page) { location.hash = '#' + page; navigate(); }
   function openHost(id) {
     $('#service-host-filter').value = id;
@@ -27,28 +27,49 @@
     const row = [...document.querySelectorAll('.port-row')].find(item => item.dataset.portId === (port.manual ? port.id : port.service_id) && item.dataset.portKind === (port.manual ? 'manual-port' : 'configured-port'));
     row?.scrollIntoView({block:'center', behavior:'smooth'});
   }
+  function serviceForPort(port) {
+    const explicit = services.find(service => service.id === port.service_id);
+    if (explicit) return explicit;
+    const sameHost = (service, port) => (service.host_id || 'local') === port.host_id;
+    const matches = services.filter(service => service.configured_port === port.port && sameHost(service, port));
+    if (matches.length === 1) return matches[0];
+    const linked = ports.filter(item => item.service_id && item.address && item.address === port.address && item.port === port.port)
+      .map(item => services.find(service => service.id === item.service_id)).filter(Boolean);
+    return linked.length === 1 ? linked[0] : null;
+  }
   function issues() {
+    const connectivity = services.filter(item => item.website_result?.status === 'Stopped');
+    const represented = new Set(connectivity.map(item => item.id));
+    const portIssues = [];
+    for (const port of ports.filter(item => ['Unreachable','Unavailable'].includes(item.status))) {
+      const service = serviceForPort(port);
+      if (service && represented.has(service.id)) continue;
+      if (service) represented.add(service.id);
+      portIssues.push({kind:'ports', service, port, label:port.status, reason:port.error || 'TCP connection could not be established.'});
+    }
     return [
       ...services.filter(item => item.status === 'Failed').map(item => ({kind:'failed', service:item, label:'Failed', reason:item.error || 'systemd reports a failed unit.'})),
       ...services.filter(item => item.status === 'Unavailable').map(item => ({kind:'unavailable', service:item, label:'Unavailable', reason:item.error || 'Service state could not be read.'})),
-      ...ports.filter(item => ['Unreachable','Unavailable'].includes(item.status)).map(item => ({kind:'ports', port:item, label:item.status, reason:item.error || 'TCP connection could not be established.'}))
+      ...connectivity.map(item => ({kind:'connectivity', service:item, label:`${item.website_result.method.toUpperCase()} Unreachable`,
+        reason:item.website_result.error || 'The configured connectivity check failed.', checked_at:item.website_result.checked_at})),
+      ...portIssues
     ];
   }
   function renderAttention() {
     const all = issues();
     $('#ov-attention-count').textContent = loaded ? all.length : '—';
     $('#ov-attention-filters').hidden = !loaded || !all.length;
-    $('#ov-attention-filters').innerHTML = [['all','All'],['failed','Failed services'],['unavailable','Unavailable services'],['ports','TCP ports']].map(([kind,label]) => `<button type="button" data-ov-filter="${kind}" data-ov-key="filter-${kind}" aria-pressed="${attentionFilter === kind}">${label} <span>${kind === 'all' ? all.length : all.filter(item => item.kind === kind).length}</span></button>`).join('');
+    $('#ov-attention-filters').innerHTML = [['all','All'],['failed','Failed services'],['unavailable','Unavailable services'],['connectivity','Connectivity issues'],['ports','TCP ports']].map(([kind,label]) => `<button type="button" data-ov-filter="${kind}" data-ov-key="filter-${kind}" aria-pressed="${attentionFilter === kind}">${label} <span>${kind === 'all' ? all.length : all.filter(item => item.kind === kind).length}</span></button>`).join('');
     const filtered = all.filter(item => attentionFilter === 'all' || item.kind === attentionFilter);
     $('#ov-attention-expand').hidden = filtered.length <= 5;
     $('#ov-attention-expand').textContent = attentionExpanded ? 'Show less ↑' : `View all ${filtered.length} →`;
     if (!loaded) { $('#ov-attention-list').innerHTML = '<p class="ov-empty">Waiting for the first inventory check…</p>'; return; }
-    if (!all.length) { $('#ov-attention-list').innerHTML = '<p class="ov-clear"><span>✓</span> No failed services, unavailable queries or unreachable ports in the latest results.</p>'; return; }
+    if (!all.length) { $('#ov-attention-list').innerHTML = '<p class="ov-clear"><span>✓</span> No failed services, unavailable queries or connectivity issues in the latest results.</p>'; return; }
     $('#ov-attention-list').innerHTML = (attentionExpanded ? filtered : filtered.slice(0,5)).map(item => {
       const record = item.service || item.port;
       const title = item.service ? name(record) : `${record.name} · ${record.port}`;
-      const target = item.service ? `data-open-detail="${esc(record.id)}"` : `data-ov-port="${esc(record.id)}"`;
-      return `<button type="button" class="ov-issue" ${target} data-ov-key="issue-${item.kind}-${esc(record.id)}"><span class="ov-issue-symbol ${item.kind === 'failed' ? 'is-failed' : ''}" aria-hidden="true">${item.kind === 'failed' ? '!' : '↯'}</span><span class="ov-issue-copy"><strong>${esc(title)}</strong><span>${esc(record.host_name || 'This host')} · ${item.service ? 'Service' : 'TCP port'}</span><small title="${esc(item.reason)}">${esc(item.reason)}</small></span><span class="ov-issue-meta">${badge(item.label)}<small>${esc(stamp(record.checked_at))}</small></span><span aria-hidden="true">›</span></button>`;
+      const target = item.service ? `data-ov-open-service="${esc(record.id)}"` : `data-ov-port="${esc(record.id)}"`;
+      return `<button type="button" class="ov-issue" ${target} data-ov-key="issue-${item.kind}-${esc(record.id)}"><span class="ov-issue-symbol ${item.kind === 'failed' ? 'is-failed' : ''}" aria-hidden="true">${item.kind === 'failed' ? '!' : '↯'}</span><span class="ov-issue-copy"><strong>${esc(title)}</strong><span>${esc(record.host_name || 'This host')} · ${item.service ? 'Service' : 'TCP port'}</span><small title="${esc(item.reason)}">${esc(item.reason)}</small></span><span class="ov-issue-meta">${badge(item.label)}<small>${esc(stamp(item.checked_at || item.port?.checked_at || record.checked_at))}</small></span><span aria-hidden="true">›</span></button>`;
     }).join('') || '<p class="ov-empty">No items in this category.</p>';
   }
   function renderFavorites() {
@@ -119,6 +140,8 @@
   $('#overview-view').addEventListener('click', event => {
     const filter = event.target.closest('[data-ov-filter]');
     if (filter) { attentionFilter=filter.dataset.ovFilter; attentionExpanded=false; schedule(); return; }
+    const service = event.target.closest('[data-ov-open-service]');
+    if (service) { event.stopPropagation(); window.HostDashboard.openServiceInServices(service.dataset.ovOpenService); return; }
     const host = event.target.closest('[data-ov-host]');
     if (host) { openHost(host.dataset.ovHost); return; }
     const port = event.target.closest('[data-ov-port]');

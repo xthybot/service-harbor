@@ -135,7 +135,7 @@ Session 每次從加鎖的儲存層確認，不使用跨請求的失效快取。
 
 ## 純網頁服務的 website_check
 
-無 unit 的註冊服務可在新增／編輯頁設定 `website_check`，存於原有 registered-services.json，沿用共用鎖及原子寫入。缺少欄位即 `{"method":"disabled"}`，不需要遷移、重置或重新匯入舊資料。
+所有服務（含內建與有 unit 的服務）均可在新增／編輯頁設定 `website_check`，註冊服務存於原有 registered-services.json，內建服務存於 service-metadata.json，沿用共用鎖及原子寫入。缺少欄位即 `{"method":"disabled"}`，不需要遷移、重置或重新匯入舊資料。
 
 ```json
 {"method": "http"}
@@ -148,3 +148,9 @@ HTTP／HTTPS 使用 Open URL；TCP 範例：
 ```
 
 TCP address 空字串、port 為 null 時，對應欄位各自取自 Open URL。沒有 Open URL 時 TCP 必須填齊 host 和 port。這些欄位不等同 systemd Service port，不會自動新增 Open ports 紀錄。檢查結果不寫入設定或 Log 檔；最後檢查時間由 API 回傳、畫面顯示。HTTP 2xx／3xx／401／403 為 Running，其他回應與網路錯誤為 Stopped；TCP 以連通為準。連線 socket timeout 為 4 秒，DNS 解析仍依作業系統 resolver。HTTP 不跟隨轉址、不下載 body，HTTPS 驗證系統信任的憑證。檢查由 Dashboard 主機發出，無法使用瀏覽器登入狀態。
+
+### systemd 與連通結果分離
+
+Check method 不受有無 unit 限制。API 的 `status`、`checked_at`、`error` 對有 unit 的服務仍代表 systemd 查詢；`website_result` 包含另外的 HTTP／TCP 狀態、原因與 `checked_at`。無 unit 的服務則沿用連通結果作為 status。記錄的 Service port 與 TCP check port 為不同欄位，設定 HTTP check 時即使 Service port 無法直連，也不會額外探測它。
+
+Services／新增服務頁刷新時，Port inventory API 使用 `probe=false`，只取設定，不發起隱含 TCP 連線；上次已取得且目標未變的 Port 結果在瀏覽器中保留。Overview／Open ports 仍會查 TCP inventory；這些結果不覆蓋 Services 的 systemd 或 Check method 結果。不存在後端常駐輪詢。

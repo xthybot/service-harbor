@@ -133,12 +133,16 @@ def check(body: dict, exclude_id: str | None = None) -> dict:
     return {**_probe(config['address'], config['port']), 'duplicates': duplicates}
 
 
-def _inspect_record(item: dict, hosts: dict) -> dict:
+def _inspect_record(item: dict, hosts: dict, probe: bool = True) -> dict:
     host = hosts.get(item['host_id'])
     address = _address(host['address']) if host else item['address']
     host_name = host['name'] if host else item['host_name']
-    result = _probe(address, item['port']) if item['host_id'].startswith('custom:') or item['host_id'] == 'local' or host else {
-        'status': 'Unavailable', 'checked_at': _timestamp(), 'error': 'Registered host was removed.'}
+    if not probe:
+        result = {'status': 'Not checked', 'checked_at': None, 'error': ''}
+    elif item['host_id'].startswith('custom:') or item['host_id'] == 'local' or host:
+        result = _probe(address, item['port'])
+    else:
+        result = {'status': 'Unavailable', 'checked_at': _timestamp(), 'error': 'Registered host was removed.'}
     return {**item, 'host_name': host_name, 'address': address, **result, 'manual': True}
 
 
@@ -150,16 +154,16 @@ def check_record(record_id: str) -> dict:
     return _inspect_record(item, hosts)
 
 
-def list_checked() -> dict:
+def list_checked(probe: bool = True) -> dict:
     records = registry.read(FILE_NAME)
     hosts = {host['id']: host for host in registry.hosts()}
 
     with ThreadPoolExecutor(max_workers=12) as executor:
-        ports = list(executor.map(lambda item: _inspect_record(item, hosts), records))
-    return {'ports': ports, 'checked_at': _timestamp()}
+        ports = list(executor.map(lambda item: _inspect_record(item, hosts, probe=probe), records))
+    return {'ports': ports, 'checked_at': _timestamp() if probe else None}
 
 
-def _inspect_configured(service: dict, assigned_ports: dict, hosts: dict, names: dict) -> dict | None:
+def _inspect_configured(service: dict, assigned_ports: dict, hosts: dict, names: dict, probe: bool = True) -> dict | None:
     port = assigned_ports.get(service['id'], service.get('port'))
     if not port:
         return None
@@ -167,8 +171,12 @@ def _inspect_configured(service: dict, assigned_ports: dict, hosts: dict, names:
     host = hosts.get(host_id)
     address = _address(host['address']) if host else '127.0.0.1' if host_id == 'local' else ''
     host_name = host['name'] if host else 'This host' if host_id == 'local' else 'Unknown host'
-    result = _probe(address, port) if address else {
-        'status': 'Unavailable', 'checked_at': _timestamp(), 'error': 'Registered host was removed.'}
+    if not probe:
+        result = {'status': 'Not checked', 'checked_at': None, 'error': ''}
+    elif address:
+        result = _probe(address, port)
+    else:
+        result = {'status': 'Unavailable', 'checked_at': _timestamp(), 'error': 'Registered host was removed.'}
     return {'id': 'service:' + service['id'], 'service_id': service['id'],
             'host_id': host_id, 'host_name': host_name, 'address': address,
             'name': names.get(service['id'], service['name']), 'source': service.get('unit', service['id']),
@@ -182,7 +190,7 @@ def check_configured(service_id: str) -> dict | None:
     return _inspect_configured(service, service_ports.get_ports(), hosts, get_names())
 
 
-def list_configured_checked() -> dict:
+def list_configured_checked(probe: bool = True) -> dict:
     from .service_names import get_names
     assigned_ports = service_ports.get_ports()
     hosts = {host['id']: host for host in registry.hosts()}
@@ -191,12 +199,12 @@ def list_configured_checked() -> dict:
                 if assigned_ports.get(service['id'], service.get('port'))]
     with ThreadPoolExecutor(max_workers=12) as executor:
         ports = [port for port in executor.map(
-            lambda service: _inspect_configured(service, assigned_ports, hosts, names), services) if port]
+            lambda service: _inspect_configured(service, assigned_ports, hosts, names, probe=probe), services) if port]
     targets = [{'id': 'local', 'name': 'This host'}, *hosts.values()]
     host_counts = [{'id': target['id'], 'name': target['name'],
                     'port_count': sum(port['host_id'] == target['id'] and port['status'] == 'Open' for port in ports)}
                    for target in targets]
-    return {'ports': ports, 'hosts': host_counts, 'checked_at': _timestamp()}
+    return {'ports': ports, 'hosts': host_counts, 'checked_at': _timestamp() if probe else None}
 
 
 def save(body: dict, record_id: str | None = None, confirm_duplicate: bool = False) -> dict:

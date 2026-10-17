@@ -74,6 +74,8 @@ def service_metadata() -> dict[str, dict]:
         if category not in {'Websites', 'Tools', 'Automation', 'Gateways', 'Monitoring', 'Network', 'Remote Access', 'Management', 'Other'} or not isinstance(description, str) or len(description) > 240:
             raise ValueError('Invalid service metadata; restore the configuration before editing.')
         result[service_id] = {'category': category, 'description': description}
+        if 'website_check' in item:
+            result[service_id]['website_check'] = item['website_check']
     return result
 
 
@@ -132,9 +134,9 @@ def update_service(service_id: str, body: dict) -> dict:
             if (kind, host_id, scope, unit) != (current_kind, current.get('host_id', 'local'), current['scope'], current_unit):
                 raise ValueError('Host, scope and unit are fixed for built-in services.')
             metadata = service_metadata()
-            metadata[service_id] = {'category': category, 'description': description}
+            metadata[service_id] = {'category': category, 'description': description, 'website_check': body['website_check']}
             write('service-metadata.json', metadata)
-            return {**current, 'category': category, 'description': description}
+            return {**current, 'category': category, 'description': description, 'website_check': body['website_check']}
         if kind == 'remote':
             target = host(host_id)
             if unit and not target.get('trusted'):

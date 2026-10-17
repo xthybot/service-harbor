@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101922">
   <title>Host Service Dashboard</title>
-  <link rel="stylesheet" href="/static/styles.css?v=user-customizations-1">
+  <link rel="stylesheet" href="/static/styles.css?v=connectivity-1">
   <link rel="stylesheet" href="/static/overview.css?v=lifecycle-3">
   <script src="/static/input-limits.js?v=lifecycle-3" defer></script>
   <script src="/static/async-state.js?v=lifecycle-3" defer></script>
   <script src="/static/modal-state.js?v=lifecycle-3" defer></script>
-  <script src="/static/app.js?v=website-checks-2" defer></script>
+  <script src="/static/app.js?v=connectivity-1" defer></script>
   <script src="/static/tracking.js?v=lifecycle-3" defer></script>
-  <script src="/static/overview.js?v=lifecycle-3" defer></script>
+  <script src="/static/overview.js?v=connectivity-1" defer></script>
   <script src="/static/hosts.js?v=ssh-pin-consistency-1" defer></script>
-  <script src="/static/add-service.js?v=website-checks-1" defer></script>
+  <script src="/static/add-service.js?v=connectivity-1" defer></script>
   <script src="/static/config-transfer.js?v=lifecycle-3" defer></script>
   <script src="/static/manual-ports.js?v=lifecycle-3" defer></script>
 </head>
@@ -89,12 +89,13 @@
         <div class="page-heading"><div><p class="eyebrow">SERVICE CATALOG</p><h1>Services</h1><p class="page-subtitle">Check health and manage allowlisted systemd units.</p></div><div class="heading-actions"><span class="updated-label">Updated <strong id="services-updated-at">just now</strong></span><button id="export-services" class="button button-secondary" type="button">↓ Export JSON</button></div></div>
         <div class="summary-grid" aria-label="Service status summary">
           <article class="summary-card summary-total" data-summary-filter="all" tabindex="0" role="button" aria-label="Show all services"><div class="summary-top"><span>Total services</span><span class="summary-icon icon-neutral">▤</span></div><div class="summary-value" id="count-total">—</div><div class="summary-foot"><span class="foot-mark">↗</span> In your service catalog</div></article>
-          <article class="summary-card" data-summary-filter="Running" tabindex="0" role="button" aria-label="Show running services"><div class="summary-top"><span>Running</span><span class="summary-icon icon-green">✓</span></div><div class="summary-value" id="count-running">—</div><div class="summary-foot"><span class="status-dot dot-green"></span> Operating normally</div></article>
+          <article class="summary-card" data-summary-filter="Running" tabindex="0" role="button" aria-label="Show running services"><div class="summary-top"><span>Running</span><span class="summary-icon icon-green">✓</span></div><div class="summary-value" id="count-running">—</div><div class="summary-foot"><span class="status-dot dot-green"></span> Service state is running</div></article>
           <article class="summary-card" data-summary-filter="Stopped" tabindex="0" role="button" aria-label="Show stopped services"><div class="summary-top"><span>Stopped</span><span class="summary-icon icon-gray">Ⅱ</span></div><div class="summary-value" id="count-stopped">—</div><div class="summary-foot">Services not currently active</div></article>
           <article class="summary-card" data-summary-filter="Failed" tabindex="0" role="button" aria-label="Show failed services"><div class="summary-top"><span>Failed</span><span class="summary-icon icon-red">!</span></div><div class="summary-value" id="count-failed">—</div><div class="summary-foot" id="failed-foot">Needs attention</div></article>
+          <article class="summary-card summary-connectivity" data-summary-filter="Connectivity" tabindex="0" role="button" aria-label="Show services with connectivity issues"><div class="summary-top"><span>Connectivity issues</span><span class="summary-icon icon-warning">!</span></div><div class="summary-value" id="count-connectivity">—</div><div class="summary-foot">HTTP / HTTPS or TCP checks failed</div></article>
         </div>
 
-        <div class="filter-bar"><label class="search-field"><span class="search-icon">⌕</span><input id="service-search-page" type="search" placeholder="Search services or ports…" autocomplete="off"></label><label class="select-wrap"><select id="status-filter-page" aria-label="Filter by status"><option value="all">All statuses</option><option value="Running">Running</option><option value="Stopped">Stopped</option><option value="Failed">Failed</option><option value="Unavailable">Unavailable</option><option value="Linked">Linked</option><option value="Unmanaged">Unmanaged</option></select></label><label class="select-wrap"><select id="category-filter-page" aria-label="Filter by category"><option value="all">All categories</option></select></label></div>
+        <div class="filter-bar"><label class="search-field"><span class="search-icon">⌕</span><input id="service-search-page" type="search" placeholder="Search services or ports…" autocomplete="off"></label><label class="select-wrap"><select id="status-filter-page" aria-label="Filter by status"><option value="all">All statuses</option><option value="Running">Running</option><option value="Stopped">Stopped</option><option value="Failed">Failed</option><option value="Unavailable">Unavailable</option><option value="Connectivity">Connectivity issues</option><option value="Linked">Linked</option><option value="Unmanaged">Unmanaged</option></select></label><label class="select-wrap"><select id="category-filter-page" aria-label="Filter by category"><option value="all">All categories</option></select></label></div>
         <div class="scope-toggle service-scope-toggle ov-services-scope" role="group" aria-label="Filter services"><button data-scope="all" class="scope-chip selected" type="button">All</button><button data-scope="user" class="scope-chip" type="button">User</button><button data-scope="system" class="scope-chip" type="button">System</button><button data-scope="favorites" class="scope-chip" type="button">☆ Favorites</button></div>
         <div class="host-filter-row"><label class="select-wrap"><select id="service-host-filter" aria-label="Filter service host"><option value="all">All hosts</option></select></label><a href="#add-service" class="text-link">Add service +</a></div>
         <div id="service-grid-page" class="service-grid"></div><p id="empty-services-page" class="empty-state" hidden>No services match these filters.</p>

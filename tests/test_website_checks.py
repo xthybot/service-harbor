@@ -87,7 +87,7 @@ class WebsiteChecks(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 website_checks.normalize(value)
         self.assertEqual(website_checks.normalize(None), {'method': 'disabled'})
-        self.assertEqual(website_checks.normalize({'method': 'http'}, managed=True), {'method': 'disabled'})
+        self.assertEqual(website_checks.normalize({'method': 'http'}, managed=True, url=self.targets.http), {'method': 'http'})
 
     def test_real_api_add_edit_live_status_and_no_control_or_journal(self):
         import uvicorn

@@ -30,6 +30,8 @@ def set_url(service_id: str, url: str) -> str:
     url = validate_url(url)
     if SERVICE_BY_ID[service_id].get('service_type') == 'external' and not url:
         raise ValueError('External websites require an HTTP or HTTPS Open URL.')
+    from .website_checks import normalize
+    normalize(SERVICE_BY_ID[service_id].get('website_check'), url=url)
     urls = get_urls()
     if url or service_id.startswith("svc-"):
         urls[service_id] = url

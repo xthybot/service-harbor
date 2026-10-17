@@ -200,3 +200,13 @@
 @media(max-width:560px){.port-edit-actions{flex-wrap:wrap}.port-edit-actions .port-delete-button{flex:1 0 100%;margin-right:0}.service-edit-modal .port-edit-actions .port-delete-button{flex:0 0 auto;margin-right:auto}}
 
 .config-import-dialog #config-import-conflicts{max-height:22vh;overflow:auto;white-space:pre-wrap;line-height:1.5}
+
+/* Keep service state distinct from optional network reachability. */
+.status-warning{color:#b87920;background:#fff5e6;border-color:#efd8b4}
+.service-status-light.status-warning{background:transparent}
+.icon-warning{color:#b87920;background:#fff5e6}
+.service-connectivity{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 9px;min-width:0}
+.connectivity-check-time{font-size:10.35px;color:#88959d;white-space:normal}
+#services-view>.summary-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media(max-width:1200px){#services-view>.summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:800px){#services-view>.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}

@@ -129,7 +129,8 @@
   function navigate() {
     if (location.hash === "#links") { location.replace("#add-service"); return; }
     if (location.hash === "#monitor") { location.assign(`${location.protocol}//${location.hostname}:8766/`); return; }
-    if (state.page !== activePage()) {
+    const pageChanged = state.page !== activePage();
+    if (pageChanged) {
       clearSelection();
       closeDrawer();
     }
@@ -141,7 +142,7 @@
     $$(".nav-link").forEach(link => link.classList.toggle("active", link.dataset.nav === state.page));
     renderServices();
     renderPorts();
-    if (state.page === "ports") refreshAll();
+    if (pageChanged && inventoryLoaded && ["overview", "ports"].includes(state.page)) refreshAll();
   }
 
   async function refreshAll() {
@@ -149,7 +150,9 @@
     const generation = ++state.refreshGeneration;
     const startedAtVersion = state.updateVersion;
     try {
-      const [serviceData, configuredData, manualData] = await Promise.all([api("/api/services"), api("/api/ports"), api("/api/ports/manual")]);
+      const probePorts = ["overview", "ports"].includes(state.page);
+      const suffix = probePorts ? "" : "?probe=false";
+      const [serviceData, configuredData, manualData] = await Promise.all([api("/api/services"), api("/api/ports" + suffix), api("/api/ports/manual" + suffix)]);
       if (generation !== state.refreshGeneration) return;
       state.services = (serviceData.services || []).map(service => {
         const update = state.selectedUpdates.get(`service:${service.id}`);
@@ -157,6 +160,8 @@
       });
       state.ports = [...(configuredData.ports || []), ...(manualData.ports || [])].map(port => {
         const update = state.selectedUpdates.get(`port:${port.id}`);
+        const previous = state.ports.find(item => item.id === port.id && item.address === port.address && item.port === port.port);
+        if (port.status === "Not checked" && previous) port = {...port, status: previous.status, checked_at: previous.checked_at, error: previous.error};
         return update && update.version > startedAtVersion ? update.record : port;
       });
       if (state.selection?.kind === "manual-port" && !state.ports.some(port => port.manual && port.id === state.selection.id)) clearSelection();
@@ -164,7 +169,7 @@
       const hosts = new Map((serviceData.port_hosts || []).map(host => [host.id, host.name]));
       state.ports.forEach(port => hosts.set(port.host_id, port.host_name));
       state.portHosts = [...hosts].map(([id, name]) => ({id, name, port_count: state.ports.filter(port => port.host_id === id && port.status === "Open").length}));
-      $("#manual-ports-updated").textContent = `Last checked ${new Date(manualData.checked_at).toLocaleString()}`;
+      if (manualData.checked_at) $("#manual-ports-updated").textContent = `Last checked ${new Date(manualData.checked_at).toLocaleString()}`;
 
       inventoryLoaded = true;
       window.dispatchEvent(new CustomEvent("dashboard:refresh-result", {detail: {ok: true}}));
@@ -174,7 +179,7 @@
       renderPorts();
       populateHostFilter();
       window.dispatchEvent(new CustomEvent("dashboard:services", { detail: state.services }));
-      window.dispatchEvent(new CustomEvent("dashboard:manual-ports", { detail: manualData.ports || [] }));
+      window.dispatchEvent(new CustomEvent("dashboard:manual-ports", { detail: state.ports.filter(port => port.manual) }));
       if (state.selected && !state.services.some(service => service.id === state.selected)) closeDrawer();
       if (state.selected) updateDrawerSummary();
       const updatedAt = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date());
@@ -293,6 +298,7 @@
     $("#count-running").textContent = running;
     $("#count-stopped").textContent = stopped;
     $("#count-failed").textContent = failed;
+    $("#count-connectivity").textContent = state.services.filter(connectivityFailed).length;
     $("#nav-service-count").textContent = state.services.length;
     $("#failed-foot").textContent = failed || unavailable ? `${failed} failed · ${unavailable} unavailable` : "No failed or unavailable units";
   }
@@ -311,7 +317,7 @@
       const portText = service.configured_port || "";
       const hostFilter = page === "services" ? $("#service-host-filter").value : "all";
       return (hostFilter === "all" || (service.host_id || (service.scope === "external" ? "external" : "local")) === hostFilter)
-        && (status === "all" || service.status === status)
+        && (status === "all" || (status === "Connectivity" ? connectivityFailed(service) : service.status === status))
         && (category === "all" || service.category === category)
         && (activeScope === "all" || (activeScope === "favorites" ? service.favorite : service.scope === activeScope))
         && (!search || `${displayName(service)} ${service.name} ${service.description} ${service.id} ${service.unit || ""} ${service.host_name || ""} ${portText}`.toLowerCase().includes(search));
@@ -319,6 +325,23 @@
   }
 
   function statusClass(status) { return status === "Running" ? "status-running" : status === "Failed" ? "status-failed" : status === "Unavailable" ? "status-unavailable" : status === "Linked" ? "status-linked" : "status-stopped"; }
+  function connectivityFailed(service) { return service.website_result?.status === "Stopped"; }
+  function serviceLightClass(service) {
+    return connectivityFailed(service) && (!isManaged(service) || service.status === "Running") ? "status-warning" : statusClass(service.status);
+  }
+  function serviceLightLabel(service) {
+    return `${service.status}${connectivityFailed(service) ? ` · ${service.website_result.method.toUpperCase()} unreachable` : ""}`;
+  }
+  function connectivityBadge(service, withTime = false) {
+    const result = service.website_result;
+    if (!result) return "";
+    const good = result.status === "Running";
+    const label = `${result.method.toUpperCase()} ${good ? "Reachable" : "Unreachable"}`;
+    const detail = [result.target, result.http_status ? `HTTP ${result.http_status}` : "", result.error,
+      result.checked_at ? `Checked ${new Date(result.checked_at).toLocaleString()}` : ""].filter(Boolean).join(" · ");
+    return `<span class="status-badge ${good ? "status-running" : "status-warning"}" title="${esc(detail)}">${esc(label)}</span>${withTime && result.checked_at ? `<span class="connectivity-check-time">Checked ${esc(new Date(result.checked_at).toLocaleTimeString())}</span>` : ""}`;
+  }
+
   function isManaged(service) { return service.managed !== false; }
   function scopeLabel(service) { return service.scope === "external" ? (service.website_check?.method && service.website_check.method !== "disabled" ? `${service.website_check.method.toUpperCase()} CHECK` : "EXTERNAL LINK") : !isManaged(service) ? "UNMANAGED" : `${service.scope.toUpperCase()} UNIT`; }
   function canOpen(service) { return !isManaged(service) || service.status === "Running" || service.service_type === "external" || service.service_type === "remote"; }
@@ -384,8 +407,8 @@
     const restartDisabled = busy || service.status === "Stopped";
     const activeTime = service.status === "Running" ? formatTime(service.active_since) : "—";
     return `<article class="service-card${state.selection?.kind === "service" && state.selection.id === service.id ? " is-selected" : ""}" data-service-id="${esc(service.id)}" tabindex="0" aria-label="Open details for ${esc(displayName(service))}">
-      <div class="service-card-top"><div class="service-identity"><span class="service-mark ${service.scope === "system" ? "mark-system" : service.web ? "mark-web" : ""}">${esc(serviceInitial(service))}</span><div class="service-copy"><div class="service-title-line"><h3 data-open-detail="${esc(service.id)}" title="View service details">${esc(displayName(service))}</h3></div><p>${esc(service.description)}</p></div></div><div class="service-status-group"><span class="service-status-light ${statusClass(service.status)}" role="img" tabindex="0" aria-label="Status: ${esc(service.status)}" data-status="${esc(service.status)}"></span><button class="favorite-indicator${service.favorite ? " is-favorite" : ""}" type="button" data-toggle-favorite="${esc(service.id)}" aria-label="${service.favorite ? "Remove from favorites" : "Add to favorites"}" aria-pressed="${String(!!service.favorite)}" title="${service.favorite ? "Remove from favorites" : "Add to favorites"}" ${state.favoriteBusy.has(service.id) ? "disabled" : ""}>${service.favorite ? "★" : "☆"}</button></div></div>
-      <div class="service-tags">${tags}</div>
+      <div class="service-card-top"><div class="service-identity"><span class="service-mark ${service.scope === "system" ? "mark-system" : service.web ? "mark-web" : ""}">${esc(serviceInitial(service))}</span><div class="service-copy"><div class="service-title-line"><h3 data-open-detail="${esc(service.id)}" title="View service details">${esc(displayName(service))}</h3></div><p>${esc(service.description)}</p></div></div><div class="service-status-group"><span class="service-status-light ${serviceLightClass(service)}" role="img" tabindex="0" aria-label="Status: ${esc(serviceLightLabel(service))}" data-status="${esc(serviceLightLabel(service))}"></span><button class="favorite-indicator${service.favorite ? " is-favorite" : ""}" type="button" data-toggle-favorite="${esc(service.id)}" aria-label="${service.favorite ? "Remove from favorites" : "Add to favorites"}" aria-pressed="${String(!!service.favorite)}" title="${service.favorite ? "Remove from favorites" : "Add to favorites"}" ${state.favoriteBusy.has(service.id) ? "disabled" : ""}>${service.favorite ? "★" : "☆"}</button></div></div>
+      <div class="service-tags">${tags}</div>${service.website_result ? `<div class="service-connectivity">${connectivityBadge(service, true)}</div>` : ""}
       <span class="started-at service-card-time">${!isManaged(service) && service.website_result ? `Last checked <strong>${esc(formatTime(service.checked_at))}</strong>` : service.status === "Running" ? `Active since <strong>${esc(activeTime)}</strong>` : !isManaged(service) ? (openUrl ? "Website shortcut" : "No systemd unit configured") : service.status === "Unavailable" ? `<span title="${esc(service.error)}">Host or unit unavailable</span>` : `Unit <strong>${service.substate === "failed" ? "failed" : "inactive"}</strong>`}</span>
       <div class="service-card-bottom"><div class="card-actions">
         ${openUrl && canOpen(service) ? `<a class="mini-action open-action" href="${esc(openUrl)}" target="_blank" rel="noopener noreferrer" title="Open service in a new tab">↗ Open</a>` : (service.web || service.open_url) ? `<button class="mini-action open-action" data-open-service="${esc(service.id)}" disabled title="${service.status !== "Running" ? "Start service to open it" : "No open URL or service port configured"}">↗ Open</button>` : ""}
@@ -494,6 +517,17 @@
     selectCheckTarget("service", serviceId);
   }
 
+  function openServiceInServices(serviceId) {
+    state.scope = "all";
+    ["#status-filter-page", "#category-filter-page", "#service-host-filter"].forEach(selector => { $(selector).value = "all"; });
+    $("#service-search-page").value = "";
+    $$("[data-scope]").forEach(item => item.classList.toggle("selected", item.dataset.scope === "all"));
+    location.hash = "#services";
+    navigate();
+    $$(".service-card").find(card => card.dataset.serviceId === serviceId)?.scrollIntoView({block: "center"});
+    openServiceDetailFresh(serviceId);
+  }
+
   function updateDrawerSummary() {
     const service = state.services.find(item => item.id === state.selected);
     if (!service) return;
@@ -522,9 +556,7 @@
   }
 
   function drawerMeta(service) {
-    const port = state.ports.find(item => !item.manual && item.service_id === service.id);
-    const connectivity = port ? `<span class="status-badge ${port.status === "Open" ? "status-running" : "status-unavailable"}" title="TCP connection from this dashboard host">TCP ${esc(port.status)}</span>` : "";
-    return `<span class="status-badge ${statusClass(service.status)}">${esc(service.status)}</span>${service.configured_port ? `<span class="port-tag">PORT ${service.configured_port}</span>` : ""}${connectivity}`;
+    return `<span class="status-badge ${statusClass(service.status)}">${esc(service.status)}</span>${service.configured_port ? `<span class="port-tag">PORT ${service.configured_port}</span>` : ""}${connectivityBadge(service, true)}`;
   }
 
   function updateFavoriteButton(service) {
@@ -781,12 +813,11 @@
     $("#service-scope").disabled = !registered || external;
     $("#service-unit").disabled = !registered || external;
     $("#service-port").disabled = external || !$("#service-unit").value.trim();
-    const managed = !external && !!$("#service-unit").value.trim();
-    $("#service-check-row").hidden = managed;
-    $("#service-check-method").disabled = managed;
-    ["address", "port"].forEach(field => { $(`#service-check-${field}`).disabled = managed || $("#service-check-method").value !== "tcp"; });
-    ["address", "port"].forEach(field => { $(`#service-check-${field}-row`).hidden = managed || $("#service-check-method").value !== "tcp"; });
-    $("#service-open-url").required = external || (!managed && $("#service-check-method").value === "http");
+    $("#service-check-row").hidden = false;
+    $("#service-check-method").disabled = false;
+    ["address", "port"].forEach(field => { $(`#service-check-${field}`).disabled = $("#service-check-method").value !== "tcp"; });
+    ["address", "port"].forEach(field => { $(`#service-check-${field}-row`).hidden = $("#service-check-method").value !== "tcp"; });
+    $("#service-open-url").required = external || $("#service-check-method").value === "http";
     $("#service-edit-note").textContent = registered ? "Editing these settings does not create, start, or stop a unit." : "Built-in service host, scope, and systemd unit are fixed.";
   }
 
@@ -854,7 +885,7 @@
       scope: serviceType === "external" ? "external" : $("#service-scope").value,
       description: $("#service-description").value.trim(), unit,
       port: unit && $("#service-port").value ? Number($("#service-port").value) : null,
-      website_check: {method: unit ? "disabled" : $("#service-check-method").value,
+      website_check: {method: $("#service-check-method").value,
         address: $("#service-check-address").value.trim(), port: $("#service-check-port").value ? Number($("#service-check-port").value) : null},
       open_url: $("#service-open-url").value.trim(), favorite: $("#service-favorite").checked
     };
@@ -1078,6 +1109,6 @@
     }
   }
 
-  window.HostDashboard = { auth, registerCleanup: fn => cleanups.add(fn), trackingCheck, syncTrackingLog, api, refreshAll, showToast, resizeTextareas, navigate, openServiceDetailFresh, selectCheckTarget, displayName, getOpenUrl, canOpen };
+  window.HostDashboard = { auth, registerCleanup: fn => cleanups.add(fn), trackingCheck, syncTrackingLog, api, refreshAll, showToast, resizeTextareas, navigate, openServiceDetailFresh, openServiceInServices, selectCheckTarget, displayName, getOpenUrl, canOpen };
   init();
 })();

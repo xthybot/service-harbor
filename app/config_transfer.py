@@ -257,7 +257,7 @@ def import_config(document: dict, overwrite: bool = False, dry_run: bool = False
                     target['category'] = item['category']
                     target['web'] = bool(item['open_url']) or (kind == 'local' and item['category'] == 'Websites')
                 else:
-                    metadata[target['id']] = {'description': item['description'], 'category': item['category']}
+                    metadata[target['id']] = {'description': item['description'], 'category': item['category'], 'website_check': item['website_check']}
             service_id = target['id']
             if item['display_name'] == target['name']:
                 names.pop(service_id, None)

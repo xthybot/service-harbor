@@ -24,17 +24,17 @@
 | Hosts | 註冊 SSH 主機、取得 Dashboard 公鑰、核對主機指紋、檢查連線。 |
 | Add service | 註冊本機／遠端現有 unit 或外部網站連結，並匯入服務設定 JSON。 |
 
-Services 卡片可直接開啟詳情。已設定 systemd unit 的服務提供 systemd 狀態、控制與 journal；純網頁服務可另外啟用下述在線檢查；User scope 使用該帳號的 user manager，System scope 的控制需要針對確切 unit 與動作授權。啟停／重啟前有確認視窗，結果以提示訊息顯示。Log 支援最近紀錄、SSE 即時追蹤、關鍵字與嚴重程度篩選，以及複製最近 5／10／20 行。頂端 **Not live／Live** 控制服務狀態與 Port 的選取輪詢；即使是 Not live，開啟服務詳情後的 Log 仍會即時追蹤，可用 Log 的 **Pause** 暫停。
+Services 卡片可直接開啟詳情。已設定 systemd unit 的服務提供 systemd 狀態、控制與 journal；所有服務均可另外啟用下述連通檢查；User scope 使用該帳號的 user manager，System scope 的控制需要針對確切 unit 與動作授權。啟停／重啟前有確認視窗，結果以提示訊息顯示。Log 支援最近紀錄、SSE 即時追蹤、關鍵字與嚴重程度篩選，以及複製最近 5／10／20 行。頂端 **Not live／Live** 控制服務狀態與 Port 的選取輪詢；即使是 Not live，開啟服務詳情後的 Log 仍會即時追蹤，可用 Log 的 **Pause** 暫停。
 
-### 純網頁服務在線檢查
+### 服務連通檢查
 
-新增或編輯沒有 systemd unit 的服務時，可設定 **Check method**：
+新增或編輯任何服務（包含已有 systemd unit 的服務）時，可設定 **Check method**：
 
 - **Disabled**：僅提供 Open；既有服務預設維持此行為，不會因更新而自動發出網路請求。
 - **HTTP / HTTPS**：從 Dashboard 主機對 Open URL 發出 GET，只讀回應標頭；2xx／3xx／401／403 顯示 Running，其他回應、連線失敗、憑證錯誤或逾時顯示 Stopped。不自動跟隨轉址，不傳登入 cookie，也不略過 HTTPS 憑證驗證。
 - **TCP**：嘗試連線至自訂 TCP host／port；留空的欄位取自 Open URL（HTTP 預設 80、HTTPS 預設 443）。連通顯示 Running，失敗顯示 Stopped；不代表網頁功能正常。
 
-卡片及詳情顯示最後檢查時間；詳情 Status 顯示方法、目標、HTTP 狀態碼或失敗原因。檢查沿用單次更新、Live 三秒與鈴鐺五秒追蹤，沒有後端常駐排程。這些服務仍不提供 Start／Stop／Restart 或 journal。設定隨 JSON 匯出／匯入；舊 JSON 缺少欄位時視為 Disabled。實測範圍及重跑方式見 [純網頁檢查驗收](docs/WEBSITE_CHECK_ACCEPTANCE.zh-TW.md)。
+Services 卡片及詳情顯示 systemd 與連通檢查各自的時間；詳情 Status 顯示方法、目標、HTTP 狀態碼或失敗原因。檢查沿用單次更新、Live 三秒與鈴鐺五秒追蹤，沒有後端常駐排程。有 unit 的服務仍以 systemd 判斷 Running／Stopped／Failed，另列 HTTP／TCP 連通結果與檢查時間；沒有 unit 的服務不提供 Start／Stop／Restart 或 journal。Services 的 Service port 只記錄 Port，不會額外自動探測該 Port；只執行設定的 Check method。Open ports／Overview 的 TCP inventory 仍可獨立檢查記錄的 Port。設定隨 JSON 匯出／匯入；舊 JSON 缺少欄位時視為 Disabled。實測範圍及重跑方式見 [純網頁檢查驗收](docs/WEBSITE_CHECK_ACCEPTANCE.zh-TW.md)。
 
 Open ports 對已記錄的目標從 **Dashboard 主機** 嘗試 TCP 連線；Open 只代表該位址與 Port 可連通，不代表 HTTP 健康或 systemd unit 正常。手動 Port 可在此新增、修改與刪除。來自 Services 的 Port 在此只顯示唯讀詳情，右上角 **View service** 會開啟對應的服務詳情；修改或移除其 Port 請到 Services。Port 數字由設定提供，系統不使用 `ss` 掃描主機或執行遠端 Port 查詢。
 
@@ -59,6 +59,12 @@ bash scripts/setup.sh       # Python venv／pip 版本
 公開分享 repository 為 `service-harbor`；亦可使用 HTTPS clone，無需私人 repository 存取權。缺少 Python／venv／pip 時會提示 `sudo apt update` 與 `sudo apt install python3 python3-pip python3-venv`，不自動安裝 apt 套件；詳細需求、權限、模式切換及防火牆請見 [安裝說明](docs/INSTALLATION.zh-TW.md)。
 
 uv 版本使用 `uv venv` 與 `uv pip`，不需要 python3-pip／python3-venv，但仍需要 Python 3 執行安裝器。兩個入口共用安裝流程，重置會沿用上次成功安裝的工具；詳見 [兩種安裝方式](docs/INSTALLATION.zh-TW.md)。
+
+### 連通異常提示
+
+Services 新增 **Connectivity issues** 黃色摘要，可點擊篩出啟用檢查且連通失敗的服務；這是獨立統計，可能同時包含 Running、Stopped、Failed 的項目。主燈優先順序為 systemd Failed 紅色、Running 但連通失敗黃色、Stopped 灰色；Stopped／Failed 仍另外顯示黃色連通異常 badge。無 unit 的服務連通失敗則顯示黃燈。未啟用檢查不會因記錄 Port 而列入此分類。
+
+Overview 的 Needs attention 會列出服務連通異常。有對應 Service 的異常會開啟 Services 的該服務詳情並清除列表篩選；只有獨立 Port 才導向 Open ports。相同服務的連通異常與重複 Port 提示會合併。Port 以 service_id 或可唯一辨識的相同主機與 Port 關聯，不以顯示名稱猜測。
 
 ### 既有安裝更新
 

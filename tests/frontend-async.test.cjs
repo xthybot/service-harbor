@@ -42,7 +42,7 @@ function harness() {
   class Source {constructor(url){this.url=url;this.listeners={};sources.push(this);}close(){this.closed=true;}addEventListener(type,fn){this.listeners[type]=fn;}}
   const context={window,document,fetch:(url,options)=>{const d=deferred();requests.push({url,options,...d});return d.promise;},EventSource:Source,Event:class{constructor(type){this.type=type;}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},URL,URLSearchParams,Intl,Date,Option:Node,AbortController,location:{hostname:'example.invalid',origin:'http://example.invalid',hash:'#services',port:'8765',protocol:'http:'},navigator:{},setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},requestAnimationFrame:()=>{},console};
   // Export closure internals only inside this VM; production source is unchanged.
-  const code=fs.readFileSync(require.resolve('../app/static/app.js'),'utf8').replace('  init();','  window.__test = {state,auth,showLogin,openServiceDetail,closeDrawer,loadStatus,loadRecentLogs,startLogStream,toggleServiceFavorite,renderPorts,updateDrawerSummary,logout,bindEvents,refreshAll,trackingCheck};');
+  const code=fs.readFileSync(require.resolve('../app/static/app.js'),'utf8').replace('  init();','  window.__test = {state,auth,showLogin,openServiceDetail,closeDrawer,loadStatus,loadRecentLogs,startLogStream,toggleServiceFavorite,renderPorts,updateDrawerSummary,logout,bindEvents,refreshAll,trackingCheck,serviceCard,renderSummary,filteredServices,updateEditorLocation};');
   vm.runInNewContext(code,context);const api=window.__test;api.auth.advance(true);api.bindEvents();
   const answer=(url,payload,status=200)=>{const r=requests.find(r=>!r.done&&r.url===url);assert.ok(r,`missing request ${url}`);r.done=true;r.resolve(response(payload,status));return r;};
   const service=id=>({id,name:id,display_name:id,description:'demo',category:'Tools',scope:'user',unit:id+'.service',managed:true,status:'Running',host_id:'local'});
@@ -242,4 +242,39 @@ test('service editor focuses immediately and does not steal focus from URL input
   h.node('service-open-url').focus();
   for(const timer of h.timers.filter(timer=>timer.delay===30))timer.fn();
   assert.equal(h.document.activeElement,h.node('service-open-url'));
+});
+
+
+test('managed service connectivity warning preserves systemd priority and filters independently',()=>{
+  const h=harness();
+  const warning={...h.service('A'),website_result:{method:'http',status:'Stopped',http_status:503,error:'HTTP 503',checked_at:'2026-10-17T00:00:00Z'}};
+  h.api.state.services=[warning,{...warning,id:'B',status:'Failed'},{...warning,id:'C',status:'Stopped'},{...warning,id:'D',managed:false,status:'Stopped'}];
+  assert.match(h.api.serviceCard(warning),/service-status-light status-warning/);
+  assert.match(h.api.serviceCard({...warning,status:'Failed'}),/service-status-light status-failed/);
+  assert.match(h.api.serviceCard({...warning,status:'Stopped'}),/service-status-light status-stopped/);
+  assert.match(h.api.serviceCard({...warning,status:'Stopped'}),/HTTP.*Unreachable/);
+  assert.match(h.api.serviceCard({...warning,managed:false,status:'Stopped'}),/service-status-light status-warning/);
+  h.api.renderSummary();assert.equal(h.node('count-connectivity').textContent,4);assert.equal(h.node('count-running').textContent,1);
+  h.node('status-filter-page').value='Connectivity';
+  assert.equal(h.api.filteredServices('services').length,4);
+});
+
+test('managed service editor keeps independent Check method available',()=>{
+  const h=harness();h.api.state.renameTarget='A';h.node('service-host').value='local';h.node('service-unit').value='example.service';h.node('service-check-method').value='tcp';
+  h.api.updateEditorLocation();
+  assert.equal(h.node('service-check-row').hidden,false);assert.equal(h.node('service-check-method').disabled,false);
+  assert.equal(h.node('service-check-port-row').hidden,false);
+});
+
+test('Overview attention links associated ports to Services and keeps standalone ports in Open ports',()=>{
+  const h=harness(),listeners={};h.window.addEventListener=(name,fn)=>{listeners[name]=fn;};
+  const source=fs.readFileSync(require.resolve('../app/static/overview.js'),'utf8').replace(/\}\)\(\);\s*$/, 'window.__ovtest={issues,renderAttention};})();');
+  vm.runInNewContext(source,h.context);
+  const service={...h.service('A'),configured_port:3000,website_result:{method:'http',status:'Stopped',error:'HTTP 503',checked_at:'now'}};
+  listeners['dashboard:inventory']({detail:{services:[service],ports:[{id:'service:A',service_id:'A',host_id:'local',port:3000,status:'Unreachable',manual:false},{id:'port-same',host_id:'local',port:3000,status:'Unreachable',manual:true},{id:'port-only',host_id:'local',port:4000,status:'Unreachable',manual:true}],loaded:true}});
+  h.window.__ovtest.renderAttention();
+  const html=h.node('ov-attention-list').innerHTML;
+  assert.match(html,/data-ov-open-service="A"/);
+  assert.doesNotMatch(html,/data-ov-port="service:A"|data-ov-port="port-same"/);
+  assert.match(html,/data-ov-port="port-only"/);
 });
