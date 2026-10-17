@@ -97,7 +97,6 @@
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) { if (selector === '#host-form-modal') closeHostForm(); else event.currentTarget.close(); }
     });
   });
-  $('#hosts-refresh').addEventListener('click', load);
   $('#host-form').addEventListener('submit', async event => {
     event.preventDefault();
     if (hostSaving) return;

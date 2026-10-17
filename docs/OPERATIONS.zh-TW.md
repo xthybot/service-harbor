@@ -133,3 +133,7 @@ systemctl --user start host-service-dashboard.service
 data/ 備份現在還包含主機、已註冊服務、私鑰與 pinned known_hosts；沿用上述本機備份方式時，備份檔須私密保存，勿推送 GitHub。還原 data/ssh 的 ownership 為 Dashboard 帳號、目錄 0700、key／known_hosts 0600。刪除主機註冊不會移除遠端 authorized_keys 的公鑰行；撤銷存取需在遠端移除。詳見 [SSH 主機管理](SSH_HOSTS.zh-TW.md)。
 
 公開分享 repository 不包含私人維運歷史。請勿直接把私人 repository 分支推送到公開版；僅從審查過、不含 data/ 和歷史規劃文件的快照發布。
+
+## 各 workspace 的手動 Refresh
+
+Overview、Services、Open ports、Hosts 與 Add service 的右上角皆提供 Refresh。Overview 刷新服務／Port inventory 與主機列表；Services 刷新狀態及連通結果，Port inventory 沿用 metadata-only；Open ports 刷新服務與 TCP Port inventory。Hosts 與 Add service 更新主機清單及公鑰資訊，不執行 SSH Check connection，也不清空新增服務的表單或重載網頁。刷新時按鈕顯示 Refreshing 並暫時停用，失敗沿用原有錯誤提示。這些按鈕不會啟用定時刷新。

@@ -81,3 +81,7 @@ uv 安裝模式使用目前 Python 並禁止自動下載 Python，不要求環�
 ### TCP Check method 取值
 
 新增／編輯不提供獨立 TCP host／port。主機取 Open URL hostname，Port 優先用 configured_port，否則 URL port／80／443。API 裝飾、Status 與單項／追蹤查詢須沿用同一規則；舊設定有 URL 時不可再優先用 website_check 的快照。無 URL 的舊獨立 TCP 設定僅保留相容讀取。Services 摘要順序為 Total services、Running、Connectivity issues、Stopped、Failed。
+
+### Workspace Refresh
+
+五個 workspace 的 page-heading 都必須保留 data-workspace-refresh 按鈕，使用 app.js 的共同處理器。Hosts 原列表內的按鈕已移到頁首；勿新增第二個 listener 造成重複請求。Add service 更新主機選項時保留草稿；Refresh 不等同 location.reload，也不觸發 SSH 信任或連線驗證。

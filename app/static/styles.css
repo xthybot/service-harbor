@@ -210,3 +210,6 @@
 #services-view>.summary-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
 @media(max-width:1200px){#services-view>.summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:800px){#services-view>.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Workspace actions wrap instead of overflowing narrow headers. */
+.page-heading .heading-actions{flex-wrap:wrap}

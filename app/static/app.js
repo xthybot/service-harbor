@@ -953,7 +953,27 @@
     });
     $("#logout-button").addEventListener("click", logout);
     $("#logout-retry").addEventListener("click", logout);
-    $("#refresh-button").addEventListener("click", refreshAll);
+    $$("[data-workspace-refresh]").forEach(button => button.addEventListener("click", async () => {
+      if (button.disabled || !auth.authenticated) return;
+      const epoch = auth.epoch;
+      const label = button.textContent;
+      const workspace = button.dataset.workspaceRefresh;
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.textContent = "↻ Refreshing…";
+      try {
+        // Host refresh updates the registration dropdown without resetting its draft.
+        if (["hosts", "add-service"].includes(workspace)) await window.HostDashboard.refreshHosts?.();
+        else if (workspace === "overview") await Promise.all([refreshAll(), window.HostDashboard.refreshHosts?.()]);
+        else await refreshAll();
+      } catch (error) {
+        if (epoch === auth.epoch && !error.stale) showToast(error.message, "error");
+      } finally {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.textContent = label;
+      }
+    }));
     const applySummaryFilter = card => {
       const status = card.dataset.summaryFilter;
       $("#status-filter-page").value = status;
