@@ -278,3 +278,33 @@ test('Overview attention links associated ports to Services and keeps standalone
   assert.doesNotMatch(html,/data-ov-port="service:A"|data-ov-port="port-same"/);
   assert.match(html,/data-ov-port="port-only"/);
 });
+
+test('Overview ignores disabled and missing check methods despite stale results and associated TCP failures',()=>{
+  const h=harness(),listeners={};h.window.addEventListener=(name,fn)=>{listeners[name]=fn;};
+  const source=fs.readFileSync(require.resolve('../app/static/overview.js'),'utf8').replace(/\}\)\(\);\s*$/, 'window.__ovtest={issues};})();');
+  vm.runInNewContext(source,h.context);
+  for(const method of ['disabled',undefined]){
+    const service={...h.service('A'),status:'Running',configured_port:3000,website_check:method?{method}:undefined,
+      website_result:{method:'tcp',status:'Stopped',error:'old TCP error'}};
+    listeners['dashboard:inventory']({detail:{services:[service],ports:[
+      {id:'service:A',service_id:'A',host_id:'local',port:3000,status:'Unreachable'},
+      {id:'standalone',host_id:'local',port:4000,status:'Unreachable',manual:true}],loaded:true}});
+    const issues=h.window.__ovtest.issues();
+    assert.equal(issues.length,1);assert.equal(issues[0].port.id,'standalone');
+    for(const status of ['Failed','Unavailable']){
+      service.status=status;
+      assert.ok(h.window.__ovtest.issues().some(issue=>issue.service?.id==='A'&&issue.label===status));
+    }
+  }
+});
+
+test('Overview ignores stale results for a different enabled check method',()=>{
+  const h=harness(),listeners={};h.window.addEventListener=(name,fn)=>{listeners[name]=fn;};
+  const source=fs.readFileSync(require.resolve('../app/static/overview.js'),'utf8').replace(/\}\)\(\);\s*$/, 'window.__ovtest={issues};})();');
+  vm.runInNewContext(source,h.context);
+  const service={...h.service('A'),status:'Running',website_check:{method:'http'},website_result:{method:'tcp',status:'Stopped'}};
+  listeners['dashboard:inventory']({detail:{services:[service],ports:[],loaded:true}});
+  assert.equal(h.window.__ovtest.issues().length,0);
+  service.website_result.method='http';
+  assert.equal(h.window.__ovtest.issues()[0].kind,'connectivity');
+});

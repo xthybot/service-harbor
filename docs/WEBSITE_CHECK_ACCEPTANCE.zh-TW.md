@@ -115,3 +115,9 @@ Services 摘要順序調整為 Total services、Running、Connectivity issues、
 - preview 的 HTTP 回應 200，ActiveState=active、SubState=running、NRestarts=0。這是隔離測試部署，不是完整新機安裝／重開機驗證；不代表真實跨主機 systemd／SSH 已實測。
 
 本節取代前節「尚未實測」的當時狀態；原始紀錄保留以供追溯。測試產物與臨時登入資料不納入 Git。
+
+## Disabled Overview 提醒回歸（2026-10-24）
+
+針對 Disabled 與舊紀錄缺少 check method 的情況，Overview 忽略殘留的失敗連通結果與關聯 Service Port 異常；systemd Failed／Unavailable 及沒有服務關聯的獨立 Port 仍提醒。設定 method 與舊結果 method 不一致時，不使用舊結果產生連通提醒。
+
+本輪 Python 全套 121 項、Node 全套 25 項通過，包含上述新增回歸情境。相較上一公開版本 8ffebf6，執行期修改僅有 overview.js 與 index.html 的資源版本；沒有相依套件、資料格式或 systemd 單元變更。已部署版本更新仍使用 git pull --ff-only；不必 setup、reset 或重新匯入。更新後重新載入頁面取得新版資源。有使用者自行修改追蹤檔時仍須先檢查 diff／保存修改，不能保證任意內容都能自動合併。
