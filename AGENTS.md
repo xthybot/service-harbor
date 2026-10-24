@@ -85,3 +85,7 @@ uv 安裝模式使用目前 Python 並禁止自動下載 Python，不要求環�
 ### Workspace Refresh
 
 只有 Overview、Services、Open ports 的 page-heading 提供 data-workspace-refresh 按鈕，緊接 Updated／最後更新時間右側，位於 Export JSON 或 Add port 等操作之前，使用 app.js 的共同處理器。Hosts 與 Add service 不放 Refresh。Refresh 不等同 location.reload，也不觸發 SSH 信任或連線驗證。
+
+### Overview Disabled 判斷
+
+Needs attention 的連通異常必須確認目前 website_check.method 為 http／tcp，且結果 method 與設定一致。對應服務 Disabled 時，不可將 Open ports 的失敗 TCP 結果重新轉成服務黃燈；systemd Failed／Unavailable 與沒有對應服務的獨立 Port 提醒仍保留。

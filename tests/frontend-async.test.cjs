@@ -270,7 +270,7 @@ test('Overview attention links associated ports to Services and keeps standalone
   const h=harness(),listeners={};h.window.addEventListener=(name,fn)=>{listeners[name]=fn;};
   const source=fs.readFileSync(require.resolve('../app/static/overview.js'),'utf8').replace(/\}\)\(\);\s*$/, 'window.__ovtest={issues,renderAttention};})();');
   vm.runInNewContext(source,h.context);
-  const service={...h.service('A'),configured_port:3000,website_result:{method:'http',status:'Stopped',error:'HTTP 503',checked_at:'now'}};
+  const service={...h.service('A'),configured_port:3000,website_check:{method:'http'},website_result:{method:'http',status:'Stopped',error:'HTTP 503',checked_at:'now'}};
   listeners['dashboard:inventory']({detail:{services:[service],ports:[{id:'service:A',service_id:'A',host_id:'local',port:3000,status:'Unreachable',manual:false},{id:'port-same',host_id:'local',port:3000,status:'Unreachable',manual:true},{id:'port-only',host_id:'local',port:4000,status:'Unreachable',manual:true}],loaded:true}});
   h.window.__ovtest.renderAttention();
   const html=h.node('ov-attention-list').innerHTML;

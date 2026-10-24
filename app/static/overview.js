@@ -37,12 +37,16 @@
       .map(item => services.find(service => service.id === item.service_id)).filter(Boolean);
     return linked.length === 1 ? linked[0] : null;
   }
+  const connectivityEnabled = service => ['http', 'tcp'].includes(service.website_check?.method);
   function issues() {
-    const connectivity = services.filter(item => item.website_result?.status === 'Stopped');
+    const connectivity = services.filter(item => connectivityEnabled(item) && item.website_result?.method === item.website_check.method && item.website_result.status === 'Stopped');
     const represented = new Set(connectivity.map(item => item.id));
     const portIssues = [];
     for (const port of ports.filter(item => ['Unreachable','Unavailable'].includes(item.status))) {
       const service = serviceForPort(port);
+      // Port inventory is independent; a disabled service check must not be
+      // re-enabled visually by a failed TCP result from Open ports.
+      if (service && !connectivityEnabled(service)) continue;
       if (service && represented.has(service.id)) continue;
       if (service) represented.add(service.id);
       portIssues.push({kind:'ports', service, port, label:port.status, reason:port.error || 'TCP connection could not be established.'});

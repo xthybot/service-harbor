@@ -154,3 +154,7 @@ TCP 主機取自 Open URL 的 hostname，Port 優先使用 Service Port；未設
 Check method 不受有無 unit 限制。API 的 `status`、`checked_at`、`error` 對有 unit 的服務仍代表 systemd 查詢；`website_result` 包含另外的 HTTP／TCP 狀態、原因與 `checked_at`。無 unit 的服務則沿用連通結果作為 status。TCP 使用記錄的 Service Port，設定 HTTP check 時即使 Service Port 無法直連，也不會額外探測它。
 
 Services／新增服務頁刷新時，Port inventory API 使用 `probe=false`，只取設定，不發起隱含 TCP 連線；上次已取得且目標未變的 Port 結果在瀏覽器中保留。Overview／Open ports 仍會查 TCP inventory；這些結果不覆蓋 Services 的 systemd 或 Check method 結果。不存在後端常駐輪詢。
+
+### Disabled 與 Overview 提醒
+
+Check method 為 Disabled（含舊資料未設定 method）時，Overview 的 Needs attention 不採用該服務的歷史連通結果，也不把對應 Open ports 的 TCP 失敗列為服務異常。systemd Failed／Unavailable 仍會列出；沒有對應服務的獨立 Port 異常仍可提醒。Open ports 的獨立 TCP inventory 與其檢查結果維持原有行為，Disabled 只停用服務的連通檢查與相關提醒。
